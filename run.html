@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Run Tracker - วิ่งเพื่อสุขภาพ</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+        body { font-family: sans-serif; -webkit-tap-highlight-color: transparent; }
+        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        .pulse-ring {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .5; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        // 🔥 กุญแจ FIREBASE ของคุณ 🔥
+        const firebaseConfig = {
+            apiKey: "AIzaSyD86PLSeOfkyVV8rCpc426G6MbEM_7Y4LU",
+            authDomain: "health-passport-school.firebaseapp.com",
+            projectId: "health-passport-school",
+            storageBucket: "health-passport-school.firebasestorage.app",
+            messagingSenderId: "282808112905",
+            appId: "1:282808112905:web:6a852eb4de9b9e146e65d8",
+            measurementId: "G-93S8363Z6Q"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.firestore();
+        // เปลี่ยนพาทฐานข้อมูลไม่ให้ตีกับ Health Passport
+        const APP_ID = 'health-run-tracker'; 
+        const RUNS_PATH = `artifacts/${APP_ID}/public/data/runs`;
+
+        const { useState, useEffect, useRef } = React;
+
+        // ฟังก์ชันคำนวณระยะทางจาก GPS 2 จุด (Haversine formula)
+        function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
+            const R = 6371; // รัศมีโลก (กิโลเมตร)
+            const dLat = (lat2 - lat1) * (Math.PI / 180);
+            const dLon = (lon2 - lon1) * (Math.PI / 180);
+            const a = 
+                Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); 
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
+            return R * c; // ระยะทาง กม.
+        }
+
+        // แปลงวินาทีเป็น MM:SS
+        function formatTime(seconds) {
+            const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+            const s = (seconds % 60).toString().padStart(2, '0');
+            return `${m}:${s}`;
+        }
+
+        function App() {
+            const [user, setUser] = useState(null);
+            const [isLoggedIn, setIsLoggedIn] = useState(false);
+            const [role, setRole] = useState('student');
+            const [studentName, setStudentName] = useState('');
+            const [inputName, setInputName] = useState('');
+            const [teacherPassword, setTeacherPassword] = useState('');
+
+            const [activeTab, setActiveTab] = useState('run');
+            const [showNotification, setShowNotification] = useState({ show: false, msg: '', type: 'success' });
+            
+            // ข้อมูลการวิ่ง
+            const [isTracking, setIsTracking] = useState(false);
+            const [distance, setDistance] = useState(0); // กิโลเมตร
+            const [elapsedTime, setElapsedTime] = useState(0); // วินาที
+            const [allRuns, setAllRuns] = useState([]);
+            
+            const watchIdRef = useRef(null);
+            const timerRef = useRef(null);
+            const lastPosRef = useRef(null);
+
+            useEffect(() => {
+                auth.signInAnonymously().catch(err => console.error(err));
+                const unsubscribe = auth.onAuthStateChanged(setUser);
+                return () => unsubscribe();
+            }, []);
+
+            useEffect(() => {
+                if (!user) return;
+                const unsubscribe = db.collection(RUNS_PATH)
+                    .onSnapshot(snapshot => {
+                        const runsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                        runsData.sort((a, b) => b.createdAt - a.createdAt);
+                        setAllRuns(runsData);
+                    }, err => console.error(err));
+                return () => unsubscribe();
+            }, [user]);
+
+            const notify = (msg, type = 'success') => {
+                setShowNotification({ show: true, msg, type });
+                setTimeout(() => setShowNotification({ show: false, msg: '', type: 'success' }), 3000);
+            };
+
+            const handleLogin = (selectedRole) => {
+                if (selectedRole === 'student') {
+                    if (inputName.trim() === '') return notify('กรุณาใส่ชื่อ-นามสกุล', 'error');
+                    setStudentName(inputName.trim());
+                }
+                if (selectedRole === 'teacher' && teacherPassword !== '191919') {
+                    return notify('รหัสผ่านไม่ถูกต้อง!', 'error');
+                }
+                setRole(selectedRole);
+                setIsLoggedIn(true);
+                setActiveTab(selectedRole === 'student' ? 'run' : 'dashboard');
+                setTeacherPassword('');
+            };
+
+            // เริ่มวิ่ง
+            const startRunning = () => {
+                if (!navigator.geolocation) {
+                    return notify('มือถือของคุณไม่รองรับ GPS', 'error');
+                }
+                
+                setIsTracking(true);
+                setDistance(0);
+                setElapsedTime(0);
+                lastPosRef.current = null;
+
+                // เริ่มจับเวลา
+                timerRef.current = setInterval(() => {
+                    setElapsedTime(prev => prev + 1);
+                }, 1000);
+
+                // เริ่มจับ GPS
+                watchIdRef.current = navigator.geolocation.watchPosition(
+                    (position) => {
+                        const currentLat = position.coords.latitude;
+                        const currentLon = position.coords.longitude;
+
+                        if (lastPosRef.current) {
+                            const dist = getDistanceFromLatLonInKm(
+                                lastPosRef.current.lat, 
+                                lastPosRef.current.lon, 
+                                currentLat, 
+                                currentLon
+                            );
+                            // กัน GPS แกว่งตอนอยู่เฉยๆ (ถ้าขยับน้อยกว่า 2 เมตรไม่นับ)
+                            if (dist > 0.002) {
+                                setDistance(prev => prev + dist);
+                            }
+                        }
+                        
+                        lastPosRef.current = { lat: currentLat, lon: currentLon };
+                    },
+                    (error) => {
+                        console.error(error);
+                        notify('กรุณาเปิดการเข้าถึงตำแหน่ง (Location)', 'error');
+                    },
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+                );
+            };
+
+            // หยุดวิ่งและบันทึก
+            const stopRunning = async () => {
+                setIsTracking(false);
+                clearInterval(timerRef.current);
+                if (watchIdRef.current) {
+                    navigator.geolocation.clearWatch(watchIdRef.current);
+                }
+
+                // ถ้าวิ่งได้น้อยกว่า 100 เมตร ไม่บันทึก (กันกดเล่น)
+                if (distance < 0.1) {
+                    notify('ระยะทางสั้นเกินไป ไม่ถูกบันทึก', 'error');
+                    setDistance(0);
+                    setElapsedTime(0);
+                    return;
+                }
+
+                try {
+                    await db.collection(RUNS_PATH).add({
+                        studentName: studentName,
+                        distanceKm: distance,
+                        durationSec: elapsedTime,
+                        dateStr: new Date().toLocaleDateString('th-TH'),
+                        timeStr: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+                        createdAt: Date.now()
+                    });
+                    notify('บันทึกสถิติการวิ่งสำเร็จ! 🎉');
+                    setDistance(0);
+                    setElapsedTime(0);
+                    setActiveTab('history');
+                } catch (error) {
+                    notify('เกิดข้อผิดพลาดในการบันทึก', 'error');
+                }
+            };
+
+            // ประมวลผลข้อมูล
+            const myRuns = allRuns.filter(r => r.studentName === studentName);
+            const myTotalDistance = myRuns.reduce((sum, run) => sum + run.distanceKm, 0);
+
+            // สำหรับครู: จัดกลุ่มตามชื่อเด็ก
+            const teacherStats = allRuns.reduce((acc, run) => {
+                if (!acc[run.studentName]) {
+                    acc[run.studentName] = { name: run.studentName, totalDist: 0, runCount: 0 };
+                }
+                acc[run.studentName].totalDist += run.distanceKm;
+                acc[run.studentName].runCount += 1;
+                return acc;
+            }, {});
+            const leaderboard = Object.values(teacherStats).sort((a, b) => b.totalDist - a.totalDist);
+
+            if (!isLoggedIn) {
+                return (
+                    <div className="min-h-screen bg-gray-100 flex justify-center items-center p-4">
+                        <div className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden p-8 text-center border-t-8 border-blue-500">
+                            <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-6">
+                                <i className="fa-solid fa-person-running text-blue-500 text-4xl"></i>
+                            </div>
+                            <h1 className="text-2xl font-black text-gray-800 mb-2">Run Tracker</h1>
+                            <p className="text-gray-500 mb-6 text-sm">แอปบันทึกระยะทางวิ่งของโรงเรียน</p>
+
+                            {!user ? (
+                                <div className="animate-pulse flex justify-center py-4 text-blue-600 font-bold">กำลังเชื่อมต่อระบบ...</div>
+                            ) : (
+                                <div className="space-y-4">
+                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
+                                        <p className="text-sm font-bold text-gray-700 text-left mb-2">สำหรับนักเรียน:</p>
+                                        <input 
+                                            type="text" 
+                                            placeholder="พิมพ์ชื่อจริง-นามสกุล..." 
+                                            value={inputName} 
+                                            onChange={(e) => setInputName(e.target.value)} 
+                                            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:border-blue-500 mb-3 font-bold" 
+                                        />
+                                        <button onClick={() => handleLogin('student')} className="w-full bg-blue-500 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                                            <i className="fa-solid fa-person-running"></i> เข้าสู่ระบบจับวิ่ง
+                                        </button>
+                                    </div>
+                                    
+                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                                        <p className="text-sm font-bold text-gray-700 text-left mb-2">สำหรับคุณครู (ดูสถิติ):</p>
+                                        <input 
+                                            type="password" 
+                                            placeholder="ใส่รหัสผ่าน..." 
+                                            value={teacherPassword} 
+                                            onChange={(e) => setTeacherPassword(e.target.value)} 
+                                            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:border-slate-500 mb-3" 
+                                        />
+                                        <button onClick={() => handleLogin('teacher')} className="w-full bg-slate-800 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-transform">
+                                            <i className="fa-solid fa-chart-simple"></i> เข้าสู่ระบบคุณครู
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-100 flex justify-center items-start p-0 sm:p-4 font-sans sm:items-center">
+                    <div className="w-full max-w-md bg-white sm:rounded-[2rem] shadow-2xl overflow-hidden flex flex-col h-screen sm:h-[850px] sm:max-h-[90vh] relative">
+                        
+                        {/* Header */}
+                        <div className={`bg-gradient-to-br ${role === 'student' ? 'from-blue-500 to-indigo-700' : 'from-slate-700 to-slate-900'} px-6 pt-10 pb-8 sm:rounded-b-[2rem] shadow-md z-10 relative text-white`}>
+                            <button onClick={() => setIsLoggedIn(false)} className="absolute top-6 right-6 p-2 bg-white/20 rounded-full hover:bg-white/30 backdrop-blur-sm">
+                                <i className="fa-solid fa-right-from-bracket"></i>
+                            </button>
+                            <div className="flex items-center gap-3 mb-6">
+                                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-blue-600 shadow-inner text-xl">
+                                    <i className={`fa-solid ${role === 'student' ? 'fa-person-running' : 'fa-chart-simple'}`}></i>
+                                </div>
+                                <div>
+                                    <p className="text-sm font-medium opacity-90">{role === 'student' ? 'นักวิ่ง' : 'กระดานสรุปผล'}</p>
+                                    <h2 className="text-xl font-bold">{role === 'student' ? studentName : 'คุณครู แอดมิน'}</h2>
+                                </div>
+                            </div>
+                            
+                            {role === 'student' && activeTab === 'run' && (
+                                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/20">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="text-white/80 text-sm font-medium">ระยะทางสะสมทั้งหมด</span>
+                                    </div>
+                                    <div className="flex items-baseline gap-1 text-white">
+                                        <span className="text-4xl font-black">{myTotalDistance.toFixed(2)}</span><span className="text-lg font-bold opacity-80">กิโลเมตร</span>
+                                    </div>
+                                </div>
+                            )}
+                            
+                            {role === 'teacher' && (
+                                <div className="text-center py-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20">
+                                    <div className="text-4xl font-black mb-1">{allRuns.reduce((s, r) => s + r.distanceKm, 0).toFixed(1)} <span className="text-lg font-normal">กม.</span></div>
+                                    <p className="text-sm opacity-90">ระยะทางรวมทั้งโรงเรียน</p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Content Area */}
+                        <div className="flex-1 overflow-y-auto bg-slate-50 p-6 -mt-4 pt-8 pb-24">
+                            
+                            {/* Student: Run Tracker Tab */}
+                            {role === 'student' && activeTab === 'run' && (
+                                <div className="flex flex-col items-center justify-center h-full">
+                                    <div className={`w-64 h-64 rounded-full border-[12px] flex flex-col items-center justify-center mb-8 relative transition-all duration-300 ${isTracking ? 'border-green-400 pulse-ring bg-green-50' : 'border-gray-200 bg-white shadow-inner'}`}>
+                                        <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-[-5px]">ระยะทาง (กม.)</span>
+                                        <span className={`text-6xl font-black tracking-tighter ${isTracking ? 'text-green-600' : 'text-gray-800'}`}>
+                                            {distance.toFixed(2)}
+                                        </span>
+                                        <span className="text-xl text-gray-500 font-mono mt-2 bg-gray-100 px-3 py-1 rounded-full">
+                                            {formatTime(elapsedTime)}
+                                        </span>
+                                    </div>
+
+                                    {!isTracking ? (
+                                        <button onClick={startRunning} className="w-full bg-blue-500 hover:bg-blue-600 text-white text-xl font-black py-5 rounded-2xl shadow-lg active:scale-95 transition-all">
+                                            <i className="fa-solid fa-play mr-2"></i> เริ่มวิ่ง!
+                                        </button>
+                                    ) : (
+                                        <button onClick={stopRunning} className="w-full bg-red-500 hover:bg-red-600 text-white text-xl font-black py-5 rounded-2xl shadow-lg active:scale-95 transition-all">
+                                            <i className="fa-solid fa-stop mr-2"></i> จบการวิ่ง และบันทึก
+                                        </button>
+                                    )}
+
+                                    <p className="text-center text-xs text-gray-400 mt-6 mt-4">
+                                        <i className="fa-solid fa-circle-info"></i> กรุณาเปิดหน้าจอทิ้งไว้ขณะวิ่ง<br/>เพื่อความแม่นยำของ GPS
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* Student: History Tab */}
+                            {role === 'student' && activeTab === 'history' && (
+                                <div>
+                                    <h2 className="text-lg font-bold text-gray-800 mb-4">ประวัติการวิ่งของคุณ</h2>
+                                    {myRuns.length === 0 ? (
+                                        <div className="bg-white p-8 rounded-3xl border border-gray-100 text-center text-gray-400">
+                                            <i className="fa-solid fa-shoe-prints text-4xl mb-3 opacity-20"></i><br/>
+                                            ยังไม่มีประวัติการวิ่ง เริ่มวิ่งกันเลย!
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {myRuns.map((r, idx) => (
+                                                <div key={r.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center">
+                                                    <div className="flex items-center gap-3">
+                                                        <div className="bg-blue-100 text-blue-600 w-10 h-10 flex items-center justify-center rounded-full text-lg">
+                                                            <i className="fa-solid fa-route"></i>
+                                                        </div>
+                                                        <div>
+                                                            <p className="text-sm font-bold text-gray-800">{r.dateStr}</p>
+                                                            <p className="text-[10px] text-gray-400"><i className="fa-solid fa-clock"></i> {r.timeStr} • วิ่งไป {formatTime(r.durationSec)} นาที</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <span className="block text-lg font-black text-blue-600">{r.distanceKm.toFixed(2)}</span>
+                                                        <span className="block text-[9px] text-gray-400 uppercase">กิโลเมตร</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Teacher: Dashboard Tab */}
+                            {role === 'teacher' && (
+                                <div>
+                                    <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
+                                        <i className="fa-solid fa-ranking-star text-yellow-500"></i> สรุประยะทางนักเรียน (Top Runners)
+                                    </h2>
+                                    {leaderboard.length === 0 ? (
+                                        <div className="bg-white p-10 rounded-3xl shadow-sm border border-gray-100 text-center text-gray-500">
+                                            ยังไม่มีข้อมูลนักเรียนวิ่ง
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-3">
+                                            {leaderboard.map((student, index) => (
+                                                <div key={index} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-200 flex justify-between items-center relative overflow-hidden">
+                                                    {index === 0 && <div className="absolute left-0 top-0 bottom-0 w-1 bg-yellow-400"></div>}
+                                                    {index === 1 && <div className="absolute left-0 top-0 bottom-0 w-1 bg-gray-300"></div>}
+                                                    {index === 2 && <div className="absolute left-0 top-0 bottom-0 w-1 bg-orange-300"></div>}
+                                                    
+                                                    <div className="flex items-center gap-3 pl-2">
+                                                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${index === 0 ? 'bg-yellow-100 text-yellow-600' : index === 1 ? 'bg-gray-100 text-gray-600' : index === 2 ? 'bg-orange-100 text-orange-600' : 'bg-slate-50 text-slate-400'}`}>
+                                                            {index + 1}
+                                                        </div>
+                                                        <div>
+                                                            <p className="font-bold text-gray-800 text-sm">{student.name}</p>
+                                                            <p className="text-[10px] text-gray-500">วิ่งไปทั้งหมด {student.runCount} ครั้ง</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="text-right">
+                                                        <span className="block text-xl font-black text-slate-700">{student.totalDist.toFixed(2)}</span>
+                                                        <span className="block text-[9px] text-gray-400 uppercase">กิโลเมตร</span>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+
+                        </div>
+
+                        {/* Bottom Navigation for Student */}
+                        {role === 'student' && (
+                            <div className="absolute bottom-0 w-full bg-white border-t border-gray-100 px-6 py-3 flex justify-around items-center z-20 pb-safe shadow-[0_-10px_20px_rgba(0,0,0,0.02)]">
+                                <button onClick={() => { setActiveTab('run'); }} className={`flex flex-col items-center gap-1 w-16 transition-colors ${activeTab === 'run' ? 'text-blue-600' : 'text-gray-400'}`}>
+                                    <div className={`p-2 rounded-xl text-xl transition-colors ${activeTab === 'run' ? 'bg-blue-50' : ''}`}><i className="fa-solid fa-person-running"></i></div>
+                                    <span className="text-[10px] font-bold">จับระยะทาง</span>
+                                </button>
+                                <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center gap-1 w-16 transition-colors ${activeTab === 'history' ? 'text-blue-600' : 'text-gray-400'}`}>
+                                    <div className={`p-2 rounded-xl text-xl transition-colors ${activeTab === 'history' ? 'bg-blue-50' : ''}`}><i className="fa-solid fa-clock-rotate-left"></i></div>
+                                    <span className="text-[10px] font-bold">ประวัติการวิ่ง</span>
+                                </button>
+                            </div>
+                        )}
+
+                        {/* Notifications */}
+                        {showNotification.show && (
+                            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
+                                <div className={`${showNotification.type === 'error' ? 'bg-red-500' : 'bg-slate-800'} text-white px-4 py-3 rounded-2xl shadow-xl text-sm font-bold flex items-center gap-2 w-max`}>
+                                    <i className={`fa-solid ${showNotification.type === 'error' ? 'fa-circle-xmark' : 'fa-circle-check'}`}></i>
+                                    {showNotification.msg}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
+
