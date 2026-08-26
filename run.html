@@ -30,7 +30,6 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        // 🔥 กุญแจ FIREBASE ของคุณ 🔥
         const firebaseConfig = {
             apiKey: "AIzaSyD86PLSeOfkyVV8rCpc426G6MbEM_7Y4LU",
             authDomain: "health-passport-school.firebaseapp.com",
@@ -87,23 +86,22 @@
             const [elapsedTime, setElapsedTime] = useState(0); 
             const [allRuns, setAllRuns] = useState([]);
             
-            // ระบบ Offline
+            // ระบบ Offline & สัญญาณ GPS
             const [isOnline, setIsOnline] = useState(navigator.onLine);
             const [offlineQueue, setOfflineQueue] = useState([]);
             const [isSyncing, setIsSyncing] = useState(false);
+            const [gpsStatus, setGpsStatus] = useState({ text: 'รอสัญญาณ GPS...', color: 'text-gray-400', icon: 'fa-satellite-dish' });
 
             const watchIdRef = useRef(null);
             const timerRef = useRef(null);
             const lastPosRef = useRef(null);
 
-            // ตรวจสอบสถานะ Online/Offline
             useEffect(() => {
                 const handleOnline = () => setIsOnline(true);
                 const handleOffline = () => setIsOnline(false);
                 window.addEventListener('online', handleOnline);
                 window.addEventListener('offline', handleOffline);
                 
-                // โหลดข้อมูลที่ค้างอยู่ในเครื่อง (Local Storage)
                 const savedQueue = JSON.parse(localStorage.getItem(LOCAL_STORAGE_KEY) || '[]');
                 setOfflineQueue(savedQueue);
 
@@ -130,12 +128,11 @@
                 return () => unsubscribe();
             }, [user]);
 
-            // ระบบ Auto Sync เมื่อเน็ตกลับมา
             useEffect(() => {
                 if (isOnline && offlineQueue.length > 0 && user && !isSyncing) {
                     syncOfflineData();
                 }
-            }, [isOnline, user]); // ทำงานเมื่อสถานะออนไลน์เปลี่ยน หรือ user พร้อม
+            }, [isOnline, user]);
 
             const notify = (msg, type = 'success') => {
                 setShowNotification({ show: true, msg, type });
@@ -164,45 +161,77 @@
                 setIsTracking(true);
                 setDistance(0);
                 setElapsedTime(0);
+                setGpsStatus({ text: 'กำลังค้นหา GPS...', color: 'text-gray-400', icon: 'fa-satellite-dish' });
                 lastPosRef.current = null;
 
                 timerRef.current = setInterval(() => {
                     setElapsedTime(prev => prev + 1);
                 }, 1000);
 
+                // เริ่มติดตามพิกัด
                 watchIdRef.current = navigator.geolocation.watchPosition(
                     (position) => {
                         const currentLat = position.coords.latitude;
                         const currentLon = position.coords.longitude;
+                        const accuracy = position.coords.accuracy; // ความคลาดเคลื่อน (เมตร)
+                        const currentTime = Date.now();
+
+                        // อัปเดต UI บอกสถานะความแม่นยำ GPS ให้เด็กเห็น
+                        if (accuracy <= 15) {
+                            setGpsStatus({ text: `สัญญาณดีเยี่ยม (±${Math.round(accuracy)}ม.)`, color: 'text-green-500', icon: 'fa-signal' });
+                        } else if (accuracy <= 30) {
+                            setGpsStatus({ text: `สัญญาณปานกลาง (±${Math.round(accuracy)}ม.)`, color: 'text-yellow-500', icon: 'fa-signal' });
+                        } else {
+                            setGpsStatus({ text: 'สัญญาณอ่อน (อยู่ในที่ร่มรึเปล่า?)', color: 'text-red-500', icon: 'fa-triangle-exclamation' });
+                        }
+
+                        // 🔥 [ระบบป้องกันพิกัดแกว่ง 1]: ถ้าความคลาดเคลื่อนเกิน 30 เมตร ให้ข้ามไปเลย ไม่เอามาคำนวณ
+                        if (accuracy > 30) return;
 
                         if (lastPosRef.current) {
-                            const dist = getDistanceFromLatLonInKm(
+                            const timeDiff = (currentTime - lastPosRef.current.time) / 1000; // วินาที
+                            const distKm = getDistanceFromLatLonInKm(
                                 lastPosRef.current.lat, 
                                 lastPosRef.current.lon, 
                                 currentLat, 
                                 currentLon
                             );
-                            if (dist > 0.002) { // เดิน/วิ่งเกิน 2 เมตรถึงจะนับ
-                                setDistance(prev => prev + dist);
+                            const distM = distKm * 1000; // แปลงเป็นเมตร
+
+                            // 🔥 [ระบบป้องกันพิกัดแกว่ง 2]: เดิน/วิ่ง ต้องขยับเกิน 4 เมตร ถึงจะเริ่มนับ เพื่อกันมือถือวางนิ่งๆ แล้วพิกัดเด้ง
+                            if (distM > 4) {
+                                const speed = distM / timeDiff; // ความเร็ว: เมตร/วินาที
+
+                                // 🔥 [ระบบป้องกันพิกัดแกว่ง 3]: ความเร็วต้องไม่เกิน 10 เมตร/วิ (36 กม./ชม.) ถ้าเกินแสดงว่า GPS เอ๋อ/วาร์ป
+                                if (speed < 10) {
+                                    setDistance(prev => prev + distKm);
+                                    lastPosRef.current = { lat: currentLat, lon: currentLon, time: currentTime };
+                                } else if (distM > 50) {
+                                    // ถ้าจู่ๆ วาร์ปไปเกิน 50 เมตร ให้บันทึกจุดใหม่เป็นฐาน แต่ไม่บวกระยะทาง
+                                    lastPosRef.current = { lat: currentLat, lon: currentLon, time: currentTime };
+                                }
                             }
+                        } else {
+                            // จุดเริ่มต้นการวิ่ง
+                            lastPosRef.current = { lat: currentLat, lon: currentLon, time: currentTime };
                         }
-                        lastPosRef.current = { lat: currentLat, lon: currentLon };
                     },
                     (error) => {
                         console.error(error);
-                        notify('กรุณาอนุญาตการเข้าถึงตำแหน่ง (GPS)', 'error');
+                        if (error.code === 1) notify('กรุณาอนุญาตการเข้าถึงตำแหน่ง (GPS)', 'error');
+                        else setGpsStatus({ text: 'ค้นหา GPS ไม่สำเร็จ', color: 'text-red-500', icon: 'fa-circle-xmark' });
                     },
                     { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
                 );
             };
 
-            // ฟังก์ชันบันทึกข้อมูล (แบบรองรับ Offline)
             const stopRunning = async () => {
                 setIsTracking(false);
                 clearInterval(timerRef.current);
                 if (watchIdRef.current) {
                     navigator.geolocation.clearWatch(watchIdRef.current);
                 }
+                setGpsStatus({ text: 'รอเริ่มการวิ่ง', color: 'text-gray-400', icon: 'fa-satellite-dish' });
 
                 if (distance < 0.1) {
                     notify('ระยะทางสั้นเกินไป ไม่ถูกบันทึก (ต้องเกิน 100 เมตร)', 'error');
@@ -212,7 +241,7 @@
                 }
 
                 const runData = {
-                    id: 'local_' + Date.now(), // สร้าง ID ชั่วคราว
+                    id: 'local_' + Date.now(),
                     studentName: studentName,
                     distanceKm: distance,
                     durationSec: elapsedTime,
@@ -222,7 +251,6 @@
                 };
 
                 if (isOnline) {
-                    // มีเน็ต เซฟลงฐานข้อมูลเลย
                     try {
                         await db.collection(RUNS_PATH).add({
                             studentName: runData.studentName,
@@ -235,11 +263,9 @@
                         notify('บันทึกสถิติสำเร็จ! 🎉');
                         setActiveTab('history');
                     } catch (error) {
-                        // เน็ตมีปัญหาตอนกด ส่งเข้าคิว Offline
                         saveToLocalQueue(runData);
                     }
                 } else {
-                    // ไม่มีเน็ต ส่งเข้าคิว Offline
                     saveToLocalQueue(runData);
                 }
 
@@ -247,16 +273,14 @@
                 setElapsedTime(0);
             };
 
-            // เซฟลงเครื่อง
             const saveToLocalQueue = (runData) => {
                 const newQueue = [...offlineQueue, runData];
                 setOfflineQueue(newQueue);
                 localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(newQueue));
-                notify('ไม่มีอินเทอร์เน็ต: บันทึกเก็บไว้ในเครื่องแล้ว จะอัปโหลดเมื่อมีเน็ต 📶', 'success');
+                notify('ไม่มีอินเทอร์เน็ต: บันทึกเก็บไว้ในเครื่องแล้ว 📶', 'success');
                 setActiveTab('history');
             };
 
-            // อัปโหลดข้อมูลค้างเข้าฐานข้อมูล
             const syncOfflineData = async () => {
                 if (offlineQueue.length === 0 || !isOnline || isSyncing) return;
                 setIsSyncing(true);
@@ -272,27 +296,25 @@
                             durationSec: run.durationSec,
                             dateStr: run.dateStr,
                             timeStr: run.timeStr,
-                            createdAt: run.createdAt // ใช้วันเวลาตอนที่วิ่งเสร็จจริง
+                            createdAt: run.createdAt
                         });
                         successCount++;
-                        // ลบออกจากคิวเมื่อสำเร็จ
                         setOfflineQueue(prev => {
                             const updated = prev.filter(item => item.id !== run.id);
                             localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
                             return updated;
                         });
                     } catch (error) {
-                        console.error('Sync failed for item', run, error);
+                        console.error('Sync failed', error);
                     }
                 }
                 
                 setIsSyncing(false);
                 if (successCount > 0) {
-                    notify(`ซิงค์ข้อมูลที่ค้างอยู่สำเร็จ ${successCount} รายการ! ☁️`, 'success');
+                    notify(`ซิงค์ข้อมูลสำเร็จ ${successCount} รายการ! ☁️`, 'success');
                 }
             };
 
-            // ประมวลผลข้อมูลสำหรับแสดง
             const myOnlineRuns = allRuns.filter(r => r.studentName === studentName);
             const myOfflineRuns = offlineQueue.filter(r => r.studentName === studentName);
             const myTotalDistance = [...myOnlineRuns, ...myOfflineRuns].reduce((sum, run) => sum + run.distanceKm, 0);
@@ -313,7 +335,7 @@
                                 <i className="fa-solid fa-person-running text-blue-500 text-4xl"></i>
                             </div>
                             <h1 className="text-2xl font-black text-gray-800 mb-2">Run Tracker</h1>
-                            <p className="text-gray-500 mb-6 text-sm">ระบบจับระยะทางวิ่งแบบกึ่งออฟไลน์</p>
+                            <p className="text-gray-500 mb-6 text-sm">ระบบจับระยะทางวิ่งของโรงเรียน</p>
 
                             {!user ? (
                                 <div className="animate-pulse flex justify-center py-4 text-blue-600 font-bold">กำลังเชื่อมต่อระบบ...</div>
@@ -359,9 +381,8 @@
                         
                         {/* Header */}
                         <div className={`bg-gradient-to-br ${role === 'student' ? 'from-blue-500 to-indigo-700' : 'from-slate-700 to-slate-900'} px-6 pt-10 pb-6 sm:rounded-b-[2rem] shadow-md z-10 relative text-white`}>
-                            {/* สถานะ Internet */}
                             <div className="absolute top-4 left-4 flex items-center gap-2 text-[10px] bg-black/20 px-2 py-1 rounded-full font-bold">
-                                {isOnline ? <><i className="fa-solid fa-wifi text-green-400"></i> ออนไลน์</> : <><i className="fa-solid fa-wifi text-red-400 opacity-50"></i> ออฟไลน์ (บันทึกลงเครื่อง)</>}
+                                {isOnline ? <><i className="fa-solid fa-wifi text-green-400"></i> ออนไลน์</> : <><i className="fa-solid fa-wifi text-red-400 opacity-50"></i> ออฟไลน์</>}
                             </div>
 
                             <button onClick={() => setIsLoggedIn(false)} className="absolute top-3 right-4 p-2 bg-white/20 rounded-full hover:bg-white/30 backdrop-blur-sm text-sm">
@@ -396,7 +417,7 @@
                             {/* Student: Run Tracker Tab */}
                             {role === 'student' && activeTab === 'run' && (
                                 <div className="flex flex-col items-center justify-center h-full">
-                                    <div className={`w-64 h-64 rounded-full border-[12px] flex flex-col items-center justify-center mb-8 relative transition-all duration-300 ${isTracking ? 'border-green-400 pulse-ring bg-green-50' : 'border-gray-200 bg-white shadow-inner'}`}>
+                                    <div className={`w-64 h-64 rounded-full border-[12px] flex flex-col items-center justify-center mb-5 relative transition-all duration-300 ${isTracking ? 'border-green-400 pulse-ring bg-green-50' : 'border-gray-200 bg-white shadow-inner'}`}>
                                         <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider mb-[-5px]">ระยะทาง (กม.)</span>
                                         <span className={`text-6xl font-black tracking-tighter ${isTracking ? 'text-green-600' : 'text-gray-800'}`}>
                                             {distance.toFixed(2)}
@@ -405,6 +426,13 @@
                                             {formatTime(elapsedTime)}
                                         </span>
                                     </div>
+
+                                    {/* ป้ายบอกสถานะ GPS ให้เด็กรู้ว่าตอนนี้แม่นยำไหม */}
+                                    {isTracking && (
+                                        <div className={`mb-6 flex items-center justify-center gap-2 text-xs font-bold bg-white px-4 py-2 rounded-full shadow-sm border border-gray-100 ${gpsStatus.color}`}>
+                                            <i className={`fa-solid ${gpsStatus.icon}`}></i> {gpsStatus.text}
+                                        </div>
+                                    )}
 
                                     {!isTracking ? (
                                         <button onClick={startRunning} className="w-full bg-blue-500 hover:bg-blue-600 text-white text-xl font-black py-5 rounded-2xl shadow-lg active:scale-95 transition-all">
@@ -416,7 +444,7 @@
                                         </button>
                                     )}
                                     <p className="text-center text-[11px] text-gray-400 mt-4 leading-tight">
-                                        <i className="fa-solid fa-circle-info"></i> ต้องเปิดหน้าจอมือถือทิ้งไว้ขณะวิ่ง<br/>หากอินเทอร์เน็ตหลุด ข้อมูลจะถูกเก็บไว้ในเครื่อง
+                                        <i className="fa-solid fa-circle-info"></i> ต้องเปิดหน้าจอมือถือทิ้งไว้ขณะวิ่ง<br/>ควรวิ่งในที่โล่งเพื่อความแม่นยำของ GPS
                                     </p>
                                 </div>
                             )}
@@ -439,7 +467,6 @@
                                         </div>
                                     ) : (
                                         <div className="space-y-3">
-                                            {/* โชว์รายการที่ค้างส่ง (Offline) ก่อน */}
                                             {myOfflineRuns.map((r, idx) => (
                                                 <div key={r.id} className="bg-orange-50 p-4 rounded-2xl shadow-sm border border-orange-200 flex justify-between items-center relative overflow-hidden">
                                                     <div className="absolute top-0 right-0 bg-orange-500 text-white text-[8px] font-bold px-2 py-0.5 rounded-bl-lg">รอส่งข้อมูล</div>
@@ -456,7 +483,6 @@
                                                 </div>
                                             ))}
                                             
-                                            {/* โชว์รายการที่ส่งเข้าเซิร์ฟเวอร์แล้ว (Online) */}
                                             {myOnlineRuns.map((r, idx) => (
                                                 <div key={r.id} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex justify-between items-center">
                                                     <div className="flex items-center gap-3">
@@ -483,9 +509,6 @@
                                     <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                                         <i className="fa-solid fa-ranking-star text-yellow-500"></i> สรุประยะทาง (กระดานผู้นำ)
                                     </h2>
-                                    <div className="mb-4 text-xs text-gray-500 bg-blue-50 p-2 rounded-lg border border-blue-100">
-                                        <i className="fa-solid fa-circle-info text-blue-500"></i> *สถิตินี้จะแสดงเฉพาะข้อมูลที่นักเรียนต่ออินเทอร์เน็ตและซิงค์เข้าระบบแล้วเท่านั้น
-                                    </div>
                                     {leaderboard.length === 0 ? (
                                         <div className="bg-white p-10 rounded-3xl shadow-sm border border-gray-100 text-center text-gray-500">
                                             ยังไม่มีข้อมูลนักเรียนวิ่ง
