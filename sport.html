@@ -91,9 +91,10 @@ const firebaseConfig = {
   appId: "1:000000000000:web:xxxxxxxxxxxx"
 };
 
-const TASKS_PATH = 'artifacts/health-passport-v4/public/data/tasks';
+const TASKS_PATH = 'artifacts/health-passport-v5/public/data/tasks';
+const USERS_PATH = 'artifacts/health-passport-v5/public/data/users'; // เพิ่มคอลเลกชันผู้ใช้งาน
 const TEACHER_PASSWORD = '191919';
-const LS_KEY = 'hp_user_v4';
+const LS_KEY = 'hp_user_v5';
 
 const GPS = {
   maxAccuracy: 25, warmupFixes: 3, minMove: 8,
@@ -134,6 +135,7 @@ const fmtDT = ts => ts ? new Date(ts).toLocaleString('th-TH',{day:'numeric',mont
 const greet = () => { const h=new Date().getHours(); return h<12?'สวัสดีตอนเช้า':h<17?'สวัสดีตอนบ่าย':'สวัสดีตอนเย็น'; };
 const initial = n => (n||'?').trim().charAt(0);
 const getStartOfWeek = (dStr) => { const d = dStr ? new Date(dStr) : new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d; };
+const shortGrade = g => g==='มัธยมศึกษาปีที่ 1'?'ม.1':g==='มัธยมศึกษาปีที่ 2'?'ม.2':g==='มัธยมศึกษาปีที่ 3'?'ม.3':g;
 
 function compressImage(file, maxSize=560, quality=.72){
   return new Promise((res,rej)=>{
@@ -149,6 +151,44 @@ function compressImage(file, maxSize=560, quality=.72){
       img.onerror=()=>rej(new Error('อ่านรูปไม่สำเร็จ')); img.src=e.target.result; };
     r.onerror=()=>rej(new Error('อ่านไฟล์ไม่สำเร็จ')); r.readAsDataURL(file);
   });
+}
+
+// แยกฟังก์ชันคำนวณสถิติเพื่อใช้ทั้งหน้านักเรียนและหน้าครู
+function calcStats(approvedTasks) {
+    const hpByDay = {}; const hpByType = {};
+    approvedTasks.forEach(t=>{
+       const dateStr = new Date(t.createdAt).toLocaleDateString('en-CA');
+       if(!hpByDay[dateStr]) hpByDay[dateStr] = [];
+       hpByDay[dateStr].push(t.hp||0);
+       
+       if(!hpByType[t.activityId]) hpByType[t.activityId] = 0;
+       hpByType[t.activityId] += (t.hp||0);
+    });
+    
+    const hpByWeek = {};
+    let totalAcc = 0, totalGrading = 0, activeWeeks = 0;
+    
+    Object.entries(hpByDay).forEach(([dStr, hps])=>{
+       const cappedDay = Math.min(100, hps.reduce((a,b)=>a+b,0)); 
+       const wKey = getStartOfWeek(dStr).toLocaleDateString('en-CA');
+       if(!hpByWeek[wKey]) hpByWeek[wKey] = 0;
+       hpByWeek[wKey] += cappedDay;
+    });
+    
+    Object.values(hpByWeek).forEach(wHP => {
+       totalAcc += wHP; 
+       const gHP = Math.min(600, wHP); 
+       totalGrading += gHP;
+       if(gHP >= 100) activeWeeks++; 
+    });
+    
+    const variety = Object.values(hpByType).filter(h=>h>=100).length;
+    const scoreA = Math.min(7, totalGrading / 100);
+    const scoreB = activeWeeks>=4 ? 2.0 : activeWeeks===3 ? 1.5 : activeWeeks===2 ? 1.0 : activeWeeks===1 ? 0.5 : 0;
+    const scoreC = variety>=4 ? 1.0 : variety===3 ? 0.7 : variety===2 ? 0.4 : 0;
+    const totalScore = (scoreA+scoreB+scoreC).toFixed(1);
+    
+    return { totalAcc, totalGrading, activeWeeks, variety, scoreA, scoreB, scoreC, totalScore, hpByWeek, hpByDay };
 }
 
 /* ============================================================
@@ -179,7 +219,7 @@ function App(){
   const [booting,setBooting]=useState(true);
   const [user,setUser]=useState(null);
   const [loginMode,setLoginMode]=useState('student');
-  const [fName,setFName]=useState(''); const [fRoom,setFRoom]=useState(''); const [fPass,setFPass]=useState('');
+  const [fName,setFName]=useState(''); const [fNumber,setFNumber]=useState(''); const [fGrade,setFGrade]=useState(''); const [fPass,setFPass]=useState('');
 
   const [activeTab,setActiveTab]=useState('home');
   const [selectedAct,setSelectedAct]=useState(null);
@@ -198,9 +238,12 @@ function App(){
   const [busy,setBusy]=useState(false);
 
   const [tasks,setTasks]=useState([]);
+  const [usersList,setUsersList]=useState([]);
   const [loadingData,setLoadingData]=useState(true);
   const [preview,setPreview]=useState(null);
   const [toast,setToast]=useState(null);
+  
+  const [teacherFilterGrade, setTeacherFilterGrade] = useState('มัธยมศึกษาปีที่ 1');
 
   const watchRef=useRef(null), timerRef=useRef(null), toastRef=useRef(null);
   const lastPos=useRef(null), warmup=useRef(0), streak=useRef(0), pending=useRef(0), movingAt=useRef(0);
@@ -222,11 +265,14 @@ function App(){
   useEffect(()=>{
     if(!user||!db) return;
     setLoadingData(true);
-    const unsub=db.collection(TASKS_PATH).onSnapshot(
+    const unsubTasks=db.collection(TASKS_PATH).onSnapshot(
       snap=>{ setTasks(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoadingData(false); },
-      err=>{ console.error(err); showToast('โหลดข้อมูลไม่สำเร็จ','error'); setLoadingData(false); }
+      err=>{ console.error(err); showToast('โหลดข้อมูลงานไม่สำเร็จ','error'); setLoadingData(false); }
     );
-    return ()=>unsub();
+    const unsubUsers=db.collection(USERS_PATH).onSnapshot(
+      snap=>{ setUsersList(snap.docs.map(d=>({id:d.id,...d.data()}))); }
+    );
+    return ()=> { unsubTasks(); unsubUsers(); };
   },[user,showToast]);
 
   const stopWatchers=useCallback(()=>{
@@ -246,8 +292,9 @@ function App(){
   useEffect(()=>{
     if(activeTab==='activity'&&!selectedAct) setActiveTab('home');
     if(activeTab==='review'&&user?.role!=='teacher') setActiveTab('home');
+    if(activeTab==='scores'&&user?.role!=='teacher') setActiveTab('home');
     
-    // โหลด Draft รูประหว่างเปิดเข้ากิจกรรมนั้นๆ
+    // โหลด Draft รูปภาพ
     if (activeTab === 'activity' && selectedAct && selectedAct.type !== 'gps' && user) {
       const draftKey = `hp_draft_${user.name}_${selectedAct.id}`;
       const draftStr = localStorage.getItem(draftKey);
@@ -258,9 +305,7 @@ function App(){
           if (Date.now() - draft.time < 5 * 3600 * 1000) {
             setImgBefore(draft.b64); setTimeBefore(draft.time);
             loaded = true;
-          } else {
-            localStorage.removeItem(draftKey); 
-          }
+          } else { localStorage.removeItem(draftKey); }
         } catch(e){}
       }
       if(!loaded){ setImgBefore(null); setTimeBefore(null); }
@@ -287,21 +332,60 @@ function App(){
     return ()=>window.removeEventListener('popstate',onPop);
   },[user]);
 
-  const handleLogin=e=>{
+  const handleLogin=async(e)=>{
     e.preventDefault();
     if(loginMode==='teacher'){
       if(fPass!==TEACHER_PASSWORD) return showToast('รหัสผ่านไม่ถูกต้อง','error');
-      const u={name:'คุณครู',room:'-',role:'teacher'};
+      const u={name:'คุณครู',grade:'-',studentNo:'-',role:'teacher'};
       localStorage.setItem(LS_KEY,JSON.stringify(u)); setUser(u); setActiveTab('review'); return showToast('ยินดีต้อนรับคุณครู');
     }
-    if(!fName.trim()) return showToast('กรุณากรอกชื่อ-นามสกุล','error');
-    const u={name:fName.trim(),room:fRoom.trim()||'-',role:'student'};
-    localStorage.setItem(LS_KEY,JSON.stringify(u)); setUser(u); setActiveTab('home'); showToast(`ยินดีต้อนรับ ${u.name}`);
+    
+    if(!fName.trim() || !fNumber.trim() || !fGrade) return showToast('กรุณากรอกข้อมูลให้ครบถ้วน','error');
+    setBusy(true);
+    
+    try {
+       const userRef = db.collection(USERS_PATH).doc(fName.trim());
+       const doc = await userRef.get();
+       
+       if(doc.exists) {
+          const data = doc.data();
+          if(data.studentNo !== fNumber.trim()) {
+             setBusy(false);
+             return showToast('ชื่อนี้ถูกลงทะเบียนด้วยเลขที่อื่นแล้ว','error');
+          }
+          const u = { name: fName.trim(), studentNo: fNumber.trim(), grade: fGrade, role: 'student' };
+          localStorage.setItem(LS_KEY, JSON.stringify(u)); setUser(u); setActiveTab('home'); showToast(`ยินดีต้อนรับ ${u.name}`);
+       } else {
+          await userRef.set({ name: fName.trim(), studentNo: fNumber.trim(), grade: fGrade, role: 'student', createdAt: Date.now() });
+          const u = { name: fName.trim(), studentNo: fNumber.trim(), grade: fGrade, role: 'student' };
+          localStorage.setItem(LS_KEY, JSON.stringify(u)); setUser(u); setActiveTab('home'); showToast('สมัครบัญชีสำเร็จ!');
+       }
+    } catch(err) {
+       showToast('เชื่อมต่อฐานข้อมูลไม่สำเร็จ','error');
+    }
+    setBusy(false);
   };
+
   const handleLogout=()=>{
     if(!window.confirm('ต้องการออกจากระบบใช่หรือไม่?')) return;
     resetActivity(); 
     localStorage.removeItem(LS_KEY); setUser(null); setTasks([]); setActiveTab('home'); setSelectedAct(null);
+  };
+
+  const deleteStudent = async (studentName) => {
+    if(!window.confirm(`⚠️ ต้องการลบบัญชีของ "${studentName}" ใช่หรือไม่?\nข้อมูลและงานที่ส่งแล้วจะถูกลบทิ้งทั้งหมด`)) return;
+    setBusy(true);
+    try {
+      await db.collection(USERS_PATH).doc(studentName).delete();
+      const snapshot = await db.collection(TASKS_PATH).where('studentName','==',studentName).get();
+      if(!snapshot.empty) {
+         const batch = db.batch();
+         snapshot.docs.forEach(d => batch.delete(d.ref));
+         await batch.commit();
+      }
+      showToast('ลบบัญชีและประวัติเรียบร้อย');
+    } catch(e) { showToast('ลบไม่สำเร็จ','error'); }
+    setBusy(false);
   };
 
   const onPosition=useCallback(pos=>{
@@ -365,7 +449,7 @@ function App(){
     if(!selectedAct||!user) return;
     const a=selectedAct;
     
-    // 1. ตรวจสอบเงื่อนไข Cooldown 2 ชม.
+    // Cooldown 2 ชม.
     const lastT = myTasks[0];
     if(lastT && lastT.createdAt) {
       const hrs = (Date.now() - lastT.createdAt) / 3600000;
@@ -381,25 +465,26 @@ function App(){
       const pace = dist > 0 ? mins / dist : 0;
       let runRate = 0.25; 
       if (pace < 3) runRate = 0; 
-      else if (pace <= 4.8) runRate = 0.75;  // วิ่งเร็ว
-      else if (pace <= 6.32) runRate = 0.65; // วิ่งดี
-      else if (pace <= 7.5) runRate = 0.55;  // วิ่งเหยาะ
-      else if (pace <= 10.92) runRate = 0.40; // เดินเร็ว
+      else if (pace <= 4.8) runRate = 0.75; 
+      else if (pace <= 6.32) runRate = 0.65; 
+      else if (pace <= 7.5) runRate = 0.55;  
+      else if (pace <= 10.92) runRate = 0.40; 
       hp = runRate * mins;
     }else{
       if(!imgBefore||!imgAfter) return showToast('ต้องมีรูปครบทั้ง 2 ใบ','error');
       if(timeDiffMinutes<a.minMin) return showToast(`เวลายังไม่ถึง ${a.minMin} นาที`,'error');
-      const effectiveMins = Math.min(240, timeDiffMinutes); // เพดานเวลาถ่ายรูป 4 ชม. ต่อครั้ง
+      const effectiveMins = Math.min(240, timeDiffMinutes); 
       hp = a.rate * effectiveMins;
     }
 
-    hp = Math.min(100, Math.round(hp)); // เพดาน 100 HP ต่อการส่ง 1 ครั้ง (และไม่เกิน 100 ต่อวันในระบบรวม)
+    hp = Math.min(100, Math.round(hp)); 
     if(hp <= 0) return showToast('กิจกรรมนี้ไม่ผ่านเกณฑ์การคำนวณ HP (เช่น วิ่งเร็วกว่า 3 นาที/กม.)','error');
 
     setBusy(true);
     try{
       await db.collection(TASKS_PATH).add({
-        studentName:user.name, room:user.room, activityId:a.id, activityName:a.name, hp:hp, status:'pending',
+        studentName:user.name, studentNo:user.studentNo, grade:user.grade,
+        activityId:a.id, activityName:a.name, hp:hp, status:'pending',
         distance:a.type==='gps'?Number(distance.toFixed(2)):null, duration:a.type==='gps'?elapsedTime:timeDiffMinutes*60,
         movingTime:a.type==='gps'?movingTime:null, avgPace:a.type==='gps'&&distance>0?Number((elapsedTime/60/distance).toFixed(2)):null,
         imgBefore:imgBefore||null, imgAfter:imgAfter||null, timeBefore:timeBefore||null, timeAfter:timeAfter||null,
@@ -420,49 +505,13 @@ function App(){
   };
 
   const myTasksApproved = useMemo(()=>myTasks.filter(t=>t.status==='approved'),[myTasks]);
-  const stats = useMemo(()=>{
-    const hpByDay = {}; const hpByType = {};
-    myTasksApproved.forEach(t=>{
-       const dateStr = new Date(t.createdAt).toLocaleDateString('en-CA');
-       if(!hpByDay[dateStr]) hpByDay[dateStr] = [];
-       hpByDay[dateStr].push(t.hp||0);
-       
-       if(!hpByType[t.activityId]) hpByType[t.activityId] = 0;
-       hpByType[t.activityId] += (t.hp||0);
-    });
-    
-    const hpByWeek = {};
-    let totalAcc = 0, totalGrading = 0, activeWeeks = 0;
-    
-    Object.entries(hpByDay).forEach(([dStr, hps])=>{
-       const cappedDay = Math.min(100, hps.reduce((a,b)=>a+b,0)); // เพดานวัน 100 HP
-       const wKey = getStartOfWeek(dStr).toLocaleDateString('en-CA');
-       if(!hpByWeek[wKey]) hpByWeek[wKey] = 0;
-       hpByWeek[wKey] += cappedDay;
-    });
-    
-    Object.values(hpByWeek).forEach(wHP => {
-       totalAcc += wHP; // สะสมอันดับไม่จำกัดเพดาน
-       const gHP = Math.min(600, wHP); // เพดาน 600 HP (6 คะแนน) ต่อสัปดาห์
-       totalGrading += gHP;
-       if(gHP >= 100) activeWeeks++; // 1 สัปดาห์ต้องได้อย่างน้อย 100 HP จึงจะนับเป็น Active
-    });
-    
-    const variety = Object.values(hpByType).filter(h=>h>=100).length;
-    
-    const scoreA = Math.min(7, totalGrading / 100);
-    const scoreB = activeWeeks>=4 ? 2.0 : activeWeeks===3 ? 1.5 : activeWeeks===2 ? 1.0 : activeWeeks===1 ? 0.5 : 0;
-    const scoreC = variety>=4 ? 1.0 : variety===3 ? 0.7 : variety===2 ? 0.4 : 0;
-    const totalScore = (scoreA+scoreB+scoreC).toFixed(1);
-    
-    return { totalAcc, totalGrading, activeWeeks, variety, scoreA, scoreB, scoreC, totalScore, hpByWeek, hpByDay };
-  },[myTasksApproved]);
+  const stats = useMemo(()=> calcStats(myTasksApproved), [myTasksApproved]);
 
   const todayStr = new Date().toLocaleDateString('en-CA');
   const todayHP = Math.min(100, (stats.hpByDay[todayStr]||[]).reduce((a,b)=>a+b,0));
   const currWKey = getStartOfWeek().toLocaleDateString('en-CA');
-  const currWeekGradingHP = Math.min(600, stats.hpByWeek[currWKey]||0); // เกรดจำกัดที่ 600/สัปดาห์
-  const currWeekAccHP = stats.hpByWeek[currWKey]||0; // แต้มสะสมไม่อั้น
+  const currWeekGradingHP = Math.min(600, stats.hpByWeek[currWKey]||0); 
+  const currWeekAccHP = stats.hpByWeek[currWKey]||0; 
 
   const pendingAll=useMemo(()=>tasks.filter(t=>t.status==='pending').sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)),[tasks]);
   
@@ -470,7 +519,7 @@ function App(){
     const m={};
     tasks.filter(t=>t.status==='approved').forEach(t=>{
       const k=t.studentName||'-';
-      if(!m[k]) m[k]={name:k,room:t.room||'-',hpByDay:{}};
+      if(!m[k]) m[k]={name:k,grade:t.grade||'-',studentNo:t.studentNo||'-',hpByDay:{}};
       const dateStr = new Date(t.createdAt).toLocaleDateString('en-CA');
       if(!m[k].hpByDay[dateStr]) m[k].hpByDay[dateStr] = [];
       m[k].hpByDay[dateStr].push(t.hp || 0);
@@ -478,7 +527,7 @@ function App(){
     const result = Object.values(m).map(u => {
       let total = 0;
       Object.entries(u.hpByDay).forEach(([dStr, hps]) => {
-          total += Math.min(100, hps.reduce((a,b)=>a+b,0)); // นับตามเพดาน 100/วัน
+          total += Math.min(100, hps.reduce((a,b)=>a+b,0)); 
       });
       u.points = total;
       return u;
@@ -486,6 +535,12 @@ function App(){
     return result;
   },[tasks]);
   const myRank=useMemo(()=>leaderboard.findIndex(r=>r.name===user?.name)+1,[leaderboard,user]);
+  
+  const filteredTeacherUsers = useMemo(()=>{
+      return usersList
+        .filter(u => u.role==='student' && u.grade === teacherFilterGrade)
+        .sort((a,b)=> Number(a.studentNo) - Number(b.studentNo));
+  }, [usersList, teacherFilterGrade]);
 
   const gpsInfo={
     warmup:['text-amber-600','bg-amber-50','fa-satellite','กำลังจับสัญญาณ GPS'], weak:['text-rose-600','bg-rose-50','fa-triangle-exclamation',`สัญญาณอ่อน (±${gpsAcc} ม.)`],
@@ -505,10 +560,26 @@ function App(){
               <button key={m} onClick={()=>setLoginMode(m)} className={`py-3 rounded-xl text-sm font-semibold ${loginMode===m?'bg-white shadow-card text-brand-600':'text-ink-400'}`}><i className={`fas ${ic} mr-1.5`}></i>{l}</button>
             ))}
           </div>
-          <form onSubmit={handleLogin} className="space-y-3">
-            {loginMode==='student' ? ( <><Field icon="fa-user" value={fName} onChange={setFName} placeholder="ชื่อ - นามสกุล"/><Field icon="fa-school" value={fRoom} onChange={setFRoom} placeholder="ห้อง (เช่น ม.1/2)"/></>
+          <form onSubmit={handleLogin} className="space-y-3 relative">
+            {busy && <div className="absolute inset-0 z-10 bg-white/50 flex items-center justify-center rounded-2xl"><i className="fas fa-spinner fa-spin text-2xl text-brand-500"></i></div>}
+            
+            {loginMode==='student' ? ( 
+              <>
+                <Field icon="fa-user" value={fName} onChange={setFName} placeholder="ชื่อ - นามสกุล"/>
+                <Field icon="fa-hashtag" type="number" value={fNumber} onChange={setFNumber} placeholder="เลขที่"/>
+                <div className="relative">
+                  <i className="fas fa-layer-group absolute left-4 top-1/2 -translate-y-1/2 text-ink-400 text-sm"></i>
+                  <select value={fGrade} onChange={e=>setFGrade(e.target.value)} className="w-full h-14 pl-11 pr-4 rounded-2xl bg-paper border border-transparent focus:bg-white focus:border-brand-400 focus:ring-4 focus:ring-brand-100 outline-none text-ink-900 appearance-none font-sans">
+                     <option value="" disabled>เลือกระดับชั้น</option>
+                     <option value="มัธยมศึกษาปีที่ 1">มัธยมศึกษาปีที่ 1</option>
+                     <option value="มัธยมศึกษาปีที่ 2">มัธยมศึกษาปีที่ 2</option>
+                     <option value="มัธยมศึกษาปีที่ 3">มัธยมศึกษาปีที่ 3</option>
+                  </select>
+                  <i className="fas fa-chevron-down absolute right-4 top-1/2 -translate-y-1/2 text-ink-400 text-xs pointer-events-none"></i>
+                </div>
+              </>
             ) : ( <Field icon="fa-lock" type="password" value={fPass} onChange={setFPass} placeholder="รหัสผ่านคุณครู"/> )}
-            <button type="submit" className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold press mt-1">เข้าสู่ระบบ</button>
+            <button type="submit" disabled={busy} className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold press mt-1">เข้าสู่ระบบ</button>
           </form>
         </div>
       </div>
@@ -516,7 +587,7 @@ function App(){
   );
 
   const isStudent = user.role==='student';
-  const hpNeeded = 100 - (stats.totalGrading % 100); // สำหรับ 1 คะแนน (100 HP)
+  const hpNeeded = 100 - (stats.totalGrading % 100); 
 
   return (
     <div className="min-h-screen pb-28">
@@ -531,7 +602,7 @@ function App(){
       <header className="relative bg-gradient-to-br from-brand-500 to-brand-700 text-white rounded-b-[32px] shadow-lift">
         <div className="safe-t px-5 pt-5 pb-20">
           <div className="flex items-center gap-3">
-            {activeTab!=='home' && activeTab!=='review' && (
+            {activeTab!=='home' && activeTab!=='review' && activeTab!=='scores' && (
               <button onClick={()=>backRef.current()} className="w-10 h-10 rounded-full glass flex items-center justify-center press flex-shrink-0"><i className="fas fa-chevron-left text-sm"></i></button>
             )}
             <div className="w-11 h-11 rounded-2xl bg-white/95 text-brand-600 flex items-center justify-center font-bold text-lg flex-shrink-0 shadow-card">
@@ -541,7 +612,9 @@ function App(){
               <p className="text-[11px] text-white/70 leading-tight">{greet()}</p>
               <h1 className="text-[17px] font-bold truncate leading-tight">{user.name}</h1>
             </div>
-            <span className="text-[11px] glass px-2.5 py-1 rounded-full font-medium whitespace-nowrap">{isStudent ? `ห้อง ${user.room}` : 'โหมดครู'}</span>
+            <span className="text-[11px] glass px-2.5 py-1 rounded-full font-medium whitespace-nowrap">
+              {isStudent ? `ชั้น ${shortGrade(user.grade)} เลขที่ ${user.studentNo}` : 'โหมดครู'}
+            </span>
             <button onClick={handleLogout} className="w-10 h-10 rounded-full glass flex items-center justify-center press flex-shrink-0"><i className="fas fa-right-from-bracket text-sm"></i></button>
           </div>
         </div>
@@ -711,7 +784,7 @@ function App(){
                       <span className={`w-9 h-9 rounded-xl ${medal} ${i<3?'text-white':'text-ink-700'} flex items-center justify-center font-bold text-sm flex-shrink-0`}>{i<3?<i className="fas fa-crown text-xs"></i>:i+1}</span>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-ink-900 text-sm truncate">{r.name}{me && <span className="text-[10px] text-brand-600 font-bold ml-1.5">คุณ</span>}</p>
-                        <p className="text-[11px] text-ink-400">ห้อง {r.room}</p>
+                        <p className="text-[11px] text-ink-400">{shortGrade(r.grade)} เลชที่ {r.studentNo}</p>
                       </div>
                       <div className="text-right flex-shrink-0">
                         <span className="font-bold text-brand-600 num">{r.points}</span>
@@ -735,6 +808,50 @@ function App(){
           </div>
         )}
 
+        {/* ================= TEACHER SCORES (หน้าดูคะแนน) ================= */}
+        {!isStudent && activeTab==='scores' && (
+           <div className="fade-up space-y-3">
+             <div className="bg-white rounded-3xl shadow-card p-4">
+                <SectionTitle icon="fa-ranking-star" color="text-brand-500" title="สรุปคะแนนนักเรียน" sub="คำนวณอัตโนมัติจากงานที่อนุมัติแล้ว" flush/>
+                <div className="flex gap-2 mt-4 overflow-x-auto pb-1 -mx-1 px-1">
+                   {['มัธยมศึกษาปีที่ 1', 'มัธยมศึกษาปีที่ 2', 'มัธยมศึกษาปีที่ 3'].map(g => (
+                      <button key={g} onClick={()=>setTeacherFilterGrade(g)} 
+                        className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all ${teacherFilterGrade===g?'bg-brand-600 text-white shadow-md':'bg-paper text-ink-500'}`}>
+                        ชั้น {shortGrade(g)}
+                      </button>
+                   ))}
+                </div>
+             </div>
+             
+             <div className="space-y-2">
+                {loadingData ? <SkeletonList/> : filteredTeacherUsers.length===0 ? <EmptyCard icon="fa-users-slash" text={`ไม่มีนักเรียนชั้น ${shortGrade(teacherFilterGrade)}`}/> : 
+                  filteredTeacherUsers.map(u => {
+                    const uTasks = tasks.filter(t => t.studentName === u.name && t.status === 'approved');
+                    const uStats = calcStats(uTasks);
+                    return (
+                      <div key={u.id} className="bg-white rounded-3xl shadow-card p-3 flex items-center justify-between gap-3 fade-up">
+                         <div className="w-12 h-12 bg-brand-50 rounded-2xl text-brand-600 font-bold text-lg flex items-center justify-center flex-shrink-0">
+                            {u.studentNo}
+                         </div>
+                         <div className="flex-1 min-w-0">
+                            <p className="font-bold text-ink-900 truncate text-[15px]">{u.name}</p>
+                            <p className="text-[11px] text-ink-400 mt-0.5">อนุมัติแล้ว {uTasks.length} งาน</p>
+                         </div>
+                         <div className="text-right flex-shrink-0">
+                            <p className="font-bold text-brand-600 text-[17px] num">{uStats.totalScore}</p>
+                            <p className="text-[10px] text-ink-400">เต็ม 10</p>
+                         </div>
+                         <button onClick={()=>deleteStudent(u.name)} className="w-10 h-10 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center press flex-shrink-0 ml-1">
+                            <i className="fas fa-trash-alt text-sm"></i>
+                         </button>
+                      </div>
+                    );
+                  })
+                }
+             </div>
+           </div>
+        )}
+
         {/* ================= TEACHER REVIEW ================= */}
         {!isStudent && activeTab==='review' && (
           <div className="fade-up space-y-3">
@@ -750,7 +867,7 @@ function App(){
                 <div key={t.id} className="bg-white rounded-3xl shadow-card p-4 fade-up">
                   <div className="flex items-center gap-3">
                     <div className="w-11 h-11 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center font-bold flex-shrink-0">{initial(t.studentName)}</div>
-                    <div className="min-w-0 flex-1"><p className="font-bold text-ink-900 truncate text-sm">{t.studentName}</p><p className="text-[11px] text-ink-400">ห้อง {t.room} · {fmtDT(t.createdAt)}</p></div>
+                    <div className="min-w-0 flex-1"><p className="font-bold text-ink-900 truncate text-sm">{t.studentName}</p><p className="text-[11px] text-ink-400">ชั้น {shortGrade(t.grade)} เลขที่ {t.studentNo} · {fmtDT(t.createdAt)}</p></div>
                     <span className="text-xs bg-brand-50 text-brand-600 px-2.5 py-1 rounded-full font-bold whitespace-nowrap">+{t.hp||0} HP</span>
                   </div>
                   <div className={`mt-3 ${a?.tint||'bg-paper'} rounded-2xl p-3 flex items-center gap-2.5`}>
@@ -789,7 +906,7 @@ function App(){
         <div className="flex max-w-lg mx-auto">
           {(isStudent
             ? [['home','หน้าหลัก','fa-house'],['leaderboard','อันดับ','fa-trophy'],['history','ประวัติ','fa-clock-rotate-left']]
-            : [['review','ตรวจงาน','fa-clipboard-check'],['leaderboard','อันดับ','fa-trophy']]
+            : [['review','ตรวจงาน','fa-clipboard-check'],['scores','คะแนน','fa-ranking-star'],['leaderboard','อันดับ','fa-trophy']]
           ).map(([tab,label,ic])=>{
             const on = activeTab===tab || (tab==='home'&&activeTab==='activity');
             return (
