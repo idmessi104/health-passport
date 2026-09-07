@@ -247,9 +247,10 @@ function App(){
     if(activeTab==='activity'&&!selectedAct) setActiveTab('home');
     if(activeTab==='review'&&user?.role!=='teacher') setActiveTab('home');
     
-    // โหลด Draft รูประหว่างเปิดเข้ากิจกรรมนั้นๆ (หมดอายุ 5 ชั่วโมง)
-    if (activeTab === 'activity' && selectedAct && selectedAct.type !== 'gps') {
-      const draftStr = localStorage.getItem('hp_draft_' + selectedAct.id);
+    // โหลด Draft รูประหว่างเปิดเข้ากิจกรรมนั้นๆ (ผูกกับชื่อนักเรียนแล้ว)
+    if (activeTab === 'activity' && selectedAct && selectedAct.type !== 'gps' && user) {
+      const draftKey = `hp_draft_${user.name}_${selectedAct.id}`;
+      const draftStr = localStorage.getItem(draftKey);
       let loaded = false;
       if (draftStr) {
         try {
@@ -258,7 +259,7 @@ function App(){
             setImgBefore(draft.b64); setTimeBefore(draft.time);
             loaded = true;
           } else {
-            localStorage.removeItem('hp_draft_' + selectedAct.id); // เกิน 5 ชม. ลบทิ้ง
+            localStorage.removeItem(draftKey); // เกิน 5 ชม. ลบทิ้ง
           }
         } catch(e){}
       }
@@ -299,7 +300,8 @@ function App(){
   };
   const handleLogout=()=>{
     if(!window.confirm('ต้องการออกจากระบบใช่หรือไม่?')) return;
-    stopWatchers(); localStorage.removeItem(LS_KEY); setUser(null); setTasks([]); setActiveTab('home'); setSelectedAct(null);
+    resetActivity(); // ล้างสถานะทั้งหมดก่อนออก
+    localStorage.removeItem(LS_KEY); setUser(null); setTasks([]); setActiveTab('home'); setSelectedAct(null);
   };
 
   const onPosition=useCallback(pos=>{
@@ -340,7 +342,8 @@ function App(){
       const now = Date.now();
       if(slot===1){ 
         setImgBefore(b64); setTimeBefore(now); 
-        if (selectedAct) localStorage.setItem('hp_draft_' + selectedAct.id, JSON.stringify({b64, time: now}));
+        // บันทึก Draft โดยระบุชื่อผู้ใช้ด้วย
+        if (selectedAct && user) localStorage.setItem(`hp_draft_${user.name}_${selectedAct.id}`, JSON.stringify({b64, time: now}));
         showToast('บันทึกรูปก่อนเริ่มแล้ว'); 
       }
       else { 
@@ -354,8 +357,8 @@ function App(){
   const deleteBeforePhoto = useCallback(() => {
     if(!window.confirm('ต้องการลบรูปก่อนเริ่มใช่หรือไม่?')) return;
     setImgBefore(null); setTimeBefore(null);
-    if (selectedAct) localStorage.removeItem('hp_draft_' + selectedAct.id);
-  }, [selectedAct]);
+    if (selectedAct && user) localStorage.removeItem(`hp_draft_${user.name}_${selectedAct.id}`);
+  }, [selectedAct, user]);
 
   const myTasks=useMemo(()=>tasks.filter(t=>t.studentName===user?.name).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)),[tasks,user]);
   
@@ -407,7 +410,7 @@ function App(){
         createdAt:Date.now(), serverAt:firebase.firestore.FieldValue.serverTimestamp(),
       });
       showToast('ส่งให้ครูตรวจเรียบร้อย!'); 
-      if (selectedAct) localStorage.removeItem('hp_draft_' + selectedAct.id); // ลบ Draft ทิ้งเมื่อส่งสำเร็จ
+      if (selectedAct && user) localStorage.removeItem(`hp_draft_${user.name}_${selectedAct.id}`); // ลบ Draft ทิ้งเมื่อส่งสำเร็จ
       resetActivity();
     }catch(err){ showToast('บันทึกไม่สำเร็จ','error'); }
     finally{ setBusy(false); }
@@ -553,7 +556,7 @@ function App(){
 
       <main className="px-4 -mt-14 relative z-10">
 
-        {/* ================= STUDENT HOME (UI ใหม่) ================= */}
+        {/* ================= STUDENT HOME ================= */}
         {isStudent && activeTab==='home' && (
           <div className="fade-up space-y-4">
             
