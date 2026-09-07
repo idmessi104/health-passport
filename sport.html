@@ -1,0 +1,723 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Health Passport | สมุดสุขภาพนักเรียน</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏃</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+<style>
+  body{font-family:'Segoe UI','Noto Sans Thai',sans-serif;-webkit-tap-highlight-color:transparent;overscroll-behavior-y:none}
+  ::-webkit-scrollbar{width:0;height:0}
+  .fade-in{animation:fade .25s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .toast-in{animation:slide .3s cubic-bezier(.2,.8,.3,1)}
+  @keyframes slide{from{opacity:0;transform:translateY(-20px)}to{opacity:1;transform:none}}
+  .pulse-ring{animation:pr 1.6s ease-out infinite}
+  @keyframes pr{0%{transform:scale(.9);opacity:.8}100%{transform:scale(1.5);opacity:0}}
+</style>
+</head>
+<body class="bg-slate-100">
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
+
+/* ============================================================
+   1) CONFIG
+============================================================ */
+// 👇 วาง config ของคุณตรงนี้ (ก๊อปจากไฟล์เดิม)
+const firebaseConfig = {
+  apiKey: "AIza...........",
+  authDomain: "health-passport-school.firebaseapp.com",
+  projectId: "health-passport-school",
+  storageBucket: "health-passport-school.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:xxxxxxxxxxxx"
+};
+
+const TASKS_PATH = 'artifacts/health-passport-final/public/data/tasks';
+const TEACHER_PASSWORD = '191919';
+const LS_KEY = 'hp_user_v2';
+
+let db = null, auth = null, initError = null;
+try {
+  firebase.initializeApp(firebaseConfig);
+  db = firebase.firestore();
+  auth = firebase.auth();
+} catch (e) { initError = e.message; }
+
+const ACTIVITIES = [
+  { id:'running', name:'วิ่งสะสมระยะ', icon:'fa-person-running', grad:'from-sky-500 to-blue-600',
+    points:10, type:'gps', minKm:0.5, desc:'จับระยะด้วย GPS อย่างน้อย 0.5 กม.' },
+  { id:'sport_family', name:'Sport Family', icon:'fa-people-roof', grad:'from-emerald-500 to-green-600',
+    points:15, type:'photo', minMin:30, desc:'ออกกำลังกายกับครอบครัว 30 นาที' },
+  { id:'sport', name:'เล่นกีฬา', icon:'fa-basketball', grad:'from-orange-500 to-amber-600',
+    points:12, type:'photo', minMin:30, desc:'เล่นกีฬาที่ชอบ 30 นาที' },
+  { id:'dancing', name:'Dancing', icon:'fa-music', grad:'from-pink-500 to-rose-600',
+    points:12, type:'photo', minMin:20, desc:'เต้นออกกำลังกาย 20 นาที' },
+];
+const actById = (id) => ACTIVITIES.find(a => a.id === id);
+
+/* ============================================================
+   2) HELPERS
+============================================================ */
+function getDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371, toRad = d => d * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+const formatTime = (s) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+const fmtDT = (ts) => ts ? new Date(ts).toLocaleString('th-TH',{dateStyle:'short',timeStyle:'short'}) : '-';
+
+function compressImage(file, maxSize = 500, quality = 0.7) {
+  return new Promise((resolve, reject) => {
+    if (!file || !file.type.startsWith('image/')) return reject(new Error('ไฟล์ไม่ใช่รูปภาพ'));
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let { width: w, height: h } = img;
+        if (w > h && w > maxSize) { h = h * maxSize / w; w = maxSize; }
+        else if (h > maxSize) { w = w * maxSize / h; h = maxSize; }
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        c.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => reject(new Error('อ่านรูปไม่สำเร็จ'));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error('อ่านไฟล์ไม่สำเร็จ'));
+    reader.readAsDataURL(file);
+  });
+}
+
+/* ============================================================
+   3) ERROR BOUNDARY  ← กันจอขาวจาก error ที่หลุดมา
+============================================================ */
+class ErrorBoundary extends React.Component {
+  constructor(p){ super(p); this.state = { err:null }; }
+  static getDerivedStateFromError(err){ return { err }; }
+  componentDidCatch(err, info){ console.error('[HealthPassport]', err, info); }
+  render(){
+    if (!this.state.err) return this.props.children;
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100">
+        <div className="bg-white rounded-2xl shadow-xl p-8 max-w-sm w-full text-center">
+          <i className="fas fa-triangle-exclamation text-5xl text-amber-500 mb-4"></i>
+          <h2 className="text-xl font-bold text-slate-800">เกิดข้อผิดพลาด</h2>
+          <p className="text-xs text-slate-500 mt-2 break-words">{String(this.state.err?.message || this.state.err)}</p>
+          <button onClick={() => this.setState({err:null})}
+            className="mt-5 w-full bg-blue-600 text-white py-3 rounded-xl font-semibold active:scale-95 transition">
+            <i className="fas fa-rotate-right mr-2"></i>กลับหน้าหลัก
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
+
+/* ============================================================
+   4) APP
+============================================================ */
+function App() {
+  /* ---- auth / user ---- */
+  const [booting, setBooting] = useState(true);
+  const [user, setUser] = useState(null);            // {name, room, role}
+  const [loginMode, setLoginMode] = useState('student');
+  const [fName, setFName] = useState('');
+  const [fRoom, setFRoom] = useState('');
+  const [fPass, setFPass] = useState('');
+
+  /* ---- navigation ---- */
+  const [activeTab, setActiveTab] = useState('home');
+  const [selectedAct, setSelectedAct] = useState(null);
+
+  /* ---- activity ---- */
+  const [isTracking, setIsTracking] = useState(false);
+  const [distance, setDistance] = useState(0);
+  const [elapsedTime, setElapsedTime] = useState(0);
+  const [gpsAcc, setGpsAcc] = useState(null);
+  const [imgBefore, setImgBefore] = useState(null);
+  const [imgAfter, setImgAfter] = useState(null);
+  const [timeBefore, setTimeBefore] = useState(null);
+  const [timeAfter, setTimeAfter] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  /* ---- data ---- */
+  const [tasks, setTasks] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [preview, setPreview] = useState(null);
+  const [toast, setToast] = useState(null);
+
+  const watchRef = useRef(null), timerRef = useRef(null), lastPos = useRef(null), toastRef = useRef(null);
+
+  const showToast = useCallback((msg, type='success') => {
+    setToast({ msg, type });
+    clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast(null), 2800);
+  }, []);
+
+  const timeDiffMinutes = useMemo(
+    () => (timeBefore && timeAfter) ? Math.max(0, Math.round((timeAfter - timeBefore) / 60000)) : 0,
+    [timeBefore, timeAfter]
+  );
+
+  /* ---------- boot ---------- */
+  useEffect(() => {
+    if (initError) { setBooting(false); return; }
+    const saved = localStorage.getItem(LS_KEY);
+    if (saved) { try { setUser(JSON.parse(saved)); } catch(e){ localStorage.removeItem(LS_KEY); } }
+    auth.signInAnonymously().catch(e => console.warn('anon auth:', e.message)).finally(() => setBooting(false));
+  }, []);
+
+  /* ---------- firestore listener ---------- */
+  useEffect(() => {
+    if (!user || !db) return;
+    setLoadingData(true);
+    const unsub = db.collection(TASKS_PATH).onSnapshot(
+      snap => { setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() }))); setLoadingData(false); },
+      err => { console.error(err); showToast('โหลดข้อมูลไม่สำเร็จ: ' + err.code, 'error'); setLoadingData(false); }
+    );
+    return () => unsub();
+  }, [user, showToast]);
+
+  /* ============================================================
+     🔧 FIX #1 — ปิด GPS ทุกครั้งที่ออกจากหน้ากิจกรรม
+  ============================================================ */
+  const stopWatchers = useCallback(() => {
+    if (watchRef.current !== null) { navigator.geolocation.clearWatch(watchRef.current); watchRef.current = null; }
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    lastPos.current = null;
+  }, []);
+  useEffect(() => () => stopWatchers(), [stopWatchers]);
+
+  /* ============================================================
+     🔧 FIX #2 — resetActivity ต้องดึง activeTab กลับ home ด้วย
+  ============================================================ */
+  const resetActivity = useCallback(() => {
+    stopWatchers();
+    setSelectedAct(null);
+    setIsTracking(false);
+    setDistance(0); setElapsedTime(0); setGpsAcc(null);
+    setImgBefore(null); setImgAfter(null);
+    setTimeBefore(null); setTimeAfter(null);
+    setBusy(false);
+    setActiveTab('home');          // ✅ บรรทัดที่หายไป = ต้นเหตุจอขาว
+  }, [stopWatchers]);
+
+  /* ============================================================
+     🔧 FIX #3 — Safety net: ถ้า tab=activity แต่ไม่มีกิจกรรม เด้งกลับ home
+  ============================================================ */
+  useEffect(() => {
+    if (activeTab === 'activity' && !selectedAct) setActiveTab('home');
+    if (activeTab === 'review' && user?.role !== 'teacher') setActiveTab('home');
+  }, [activeTab, selectedAct, user]);
+
+  /* ============================================================
+     🔧 FIX #4 — รองรับปุ่ม Back ของมือถือ/เบราว์เซอร์
+  ============================================================ */
+  const navigate = useCallback((tab, act = null) => {
+    setActiveTab(tab);
+    setSelectedAct(act);
+    window.history.pushState({ hp: true, tab }, '');
+  }, []);
+
+  const backRef = useRef(() => {});
+  backRef.current = () => {
+    if (preview) { setPreview(null); window.history.pushState({hp:true},''); return; }
+    if (isTracking) {
+      if (!window.confirm('กำลังจับเวลาอยู่ ออกจากหน้านี้จะไม่บันทึกข้อมูล ยืนยันหรือไม่?')) {
+        window.history.pushState({ hp:true, tab:activeTab }, ''); return;
+      }
+    }
+    if (activeTab === 'activity') resetActivity();
+    else if (activeTab !== 'home') setActiveTab('home');
+    else window.history.pushState({ hp:true, tab:'home' }, '');   // อยู่ home แล้ว ไม่ให้หลุดออกแอพ
+  };
+
+  useEffect(() => {
+    if (!user) return;
+    window.history.replaceState({ hp: true, tab: 'home' }, '');
+    window.history.pushState({ hp: true, tab: 'home' }, '');
+    const onPop = () => backRef.current();
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, [user]);
+
+  /* ---------- login ---------- */
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (loginMode === 'teacher') {
+      if (fPass !== TEACHER_PASSWORD) return showToast('รหัสผ่านไม่ถูกต้อง', 'error');
+      const u = { name: 'คุณครู', room: '-', role: 'teacher' };
+      localStorage.setItem(LS_KEY, JSON.stringify(u)); setUser(u); setActiveTab('review');
+      return showToast('ยินดีต้อนรับคุณครู');
+    }
+    if (!fName.trim()) return showToast('กรุณากรอกชื่อ-นามสกุล', 'error');
+    const u = { name: fName.trim(), room: fRoom.trim() || '-', role: 'student' };
+    localStorage.setItem(LS_KEY, JSON.stringify(u)); setUser(u); setActiveTab('home');
+    showToast(`สวัสดี ${u.name} 👋`);
+  };
+  const handleLogout = () => {
+    if (!window.confirm('ต้องการออกจากระบบใช่หรือไม่?')) return;
+    stopWatchers(); localStorage.removeItem(LS_KEY);
+    setUser(null); setTasks([]); setActiveTab('home'); setSelectedAct(null);
+  };
+
+  /* ---------- GPS ---------- */
+  const startRunning = () => {
+    if (!navigator.geolocation) return showToast('อุปกรณ์ไม่รองรับ GPS', 'error');
+    setDistance(0); setElapsedTime(0); lastPos.current = null; setIsTracking(true);
+    timerRef.current = setInterval(() => setElapsedTime(t => t + 1), 1000);
+    watchRef.current = navigator.geolocation.watchPosition(
+      pos => {
+        const { latitude, longitude, accuracy } = pos.coords;
+        setGpsAcc(Math.round(accuracy));
+        if (accuracy > 50) return;                       // สัญญาณแย่ ข้ามจุดนี้
+        if (lastPos.current) {
+          const d = getDistance(lastPos.current.lat, lastPos.current.lng, latitude, longitude);
+          if (d > 0.002 && d < 0.2) setDistance(x => x + d);   // กันจุดเพี้ยน
+        }
+        lastPos.current = { lat: latitude, lng: longitude };
+      },
+      err => { showToast('GPS: ' + err.message, 'error'); },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+    );
+  };
+  const stopRunning = () => { stopWatchers(); setIsTracking(false); };
+
+  /* ---------- upload ---------- */
+  const handleUpload = async (e, slot) => {
+    const file = e.target.files?.[0]; if (!file) return;
+    setBusy(true);
+    try {
+      const b64 = await compressImage(file);
+      if (slot === 1) { setImgBefore(b64); setTimeBefore(Date.now()); showToast('บันทึกรูปก่อนเริ่มแล้ว'); }
+      else            { setImgAfter(b64);  setTimeAfter(Date.now());  showToast('บันทึกรูปหลังเสร็จแล้ว'); }
+    } catch (err) { showToast(err.message, 'error'); }
+    finally { setBusy(false); e.target.value = ''; }
+  };
+
+  /* ---------- submit ---------- */
+  const submitTask = async () => {
+    if (!selectedAct || !user) return;
+    const a = selectedAct;
+    if (a.type === 'gps') {
+      if (isTracking) return showToast('กรุณากดหยุดก่อนส่ง', 'error');
+      if (distance < a.minKm) return showToast(`ระยะยังไม่ถึง ${a.minKm} กม.`, 'error');
+    } else {
+      if (!imgBefore || !imgAfter) return showToast('ต้องมีรูปครบทั้ง 2 ใบ', 'error');
+      if (timeDiffMinutes < a.minMin) return showToast(`เวลายังไม่ถึง ${a.minMin} นาที (ตอนนี้ ${timeDiffMinutes} นาที)`, 'error');
+    }
+    setBusy(true);
+    try {
+      await db.collection(TASKS_PATH).add({
+        studentName: user.name, room: user.room,
+        activityId: a.id, activityName: a.name, points: a.points,
+        status: 'pending',
+        distance: a.type === 'gps' ? Number(distance.toFixed(2)) : null,
+        duration: a.type === 'gps' ? elapsedTime : timeDiffMinutes * 60,
+        imgBefore: imgBefore || null, imgAfter: imgAfter || null,
+        timeBefore: timeBefore || null, timeAfter: timeAfter || null,
+        createdAt: Date.now(),
+        serverAt: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      showToast('ส่งให้ครูตรวจเรียบร้อย! 🎉');
+      resetActivity();
+    } catch (err) { console.error(err); showToast('บันทึกไม่สำเร็จ: ' + err.code, 'error'); }
+    finally { setBusy(false); }
+  };
+
+  /* ---------- teacher ---------- */
+  const review = async (id, status) => {
+    try {
+      await db.collection(TASKS_PATH).doc(id).update({
+        status, reviewedAt: Date.now(), reviewedBy: user.name
+      });
+      showToast(status === 'approved' ? 'อนุมัติแล้ว ✅' : 'ปฏิเสธแล้ว ❌', status === 'approved' ? 'success' : 'error');
+    } catch (err) { showToast('อัปเดตไม่สำเร็จ: ' + err.code, 'error'); }
+  };
+
+  /* ---------- derived ---------- */
+  const myTasks = useMemo(
+    () => tasks.filter(t => t.studentName === user?.name).sort((a,b) => (b.createdAt||0)-(a.createdAt||0)),
+    [tasks, user]
+  );
+  const myPoints  = useMemo(() => myTasks.filter(t=>t.status==='approved').reduce((s,t)=>s+(t.points||0),0), [myTasks]);
+  const myPending = useMemo(() => myTasks.filter(t=>t.status==='pending').length, [myTasks]);
+  const pendingAll = useMemo(
+    () => tasks.filter(t => t.status === 'pending').sort((a,b) => (a.createdAt||0)-(b.createdAt||0)),
+    [tasks]
+  );
+  const leaderboard = useMemo(() => {
+    const m = {};
+    tasks.filter(t => t.status === 'approved').forEach(t => {
+      const k = t.studentName || '-';
+      if (!m[k]) m[k] = { name: k, room: t.room || '-', points: 0, count: 0 };
+      m[k].points += t.points || 0; m[k].count++;
+    });
+    return Object.values(m).sort((a,b) => b.points - a.points).slice(0, 10);
+  }, [tasks]);
+  const myRank = useMemo(() => leaderboard.findIndex(r => r.name === user?.name) + 1, [leaderboard, user]);
+
+  /* ============================================================
+     RENDER
+  ============================================================ */
+  if (initError) return (
+    <div className="min-h-screen flex items-center justify-center p-6">
+      <div className="bg-white p-8 rounded-2xl shadow text-center max-w-sm">
+        <i className="fas fa-plug-circle-xmark text-4xl text-red-500 mb-3"></i>
+        <p className="font-bold text-slate-800">เชื่อมต่อ Firebase ไม่สำเร็จ</p>
+        <p className="text-xs text-slate-500 mt-2">{initError}</p>
+      </div>
+    </div>
+  );
+
+  if (booting) return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-blue-600 to-cyan-500">
+      <i className="fas fa-heart-pulse text-6xl text-white animate-pulse"></i>
+      <p className="text-white/90 mt-4 font-semibold tracking-wide">Health Passport</p>
+    </div>
+  );
+
+  /* ---------- LOGIN ---------- */
+  if (!user) return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-600 via-cyan-500 to-teal-400 flex items-center justify-center p-5">
+      <Toast toast={toast} />
+      <div className="bg-white/95 backdrop-blur w-full max-w-sm rounded-3xl shadow-2xl p-7 fade-in">
+        <div className="text-center mb-6">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center shadow-lg">
+            <i className="fas fa-heart-pulse text-3xl text-white"></i>
+          </div>
+          <h1 className="text-2xl font-extrabold text-slate-800 mt-3">Health Passport</h1>
+          <p className="text-xs text-slate-500">สมุดบันทึกสุขภาพนักเรียน</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl mb-5">
+          {[['student','นักเรียน','fa-child-reaching'],['teacher','คุณครู','fa-chalkboard-user']].map(([m,l,ic]) => (
+            <button key={m} onClick={() => setLoginMode(m)}
+              className={`py-2.5 rounded-lg text-sm font-bold transition ${loginMode===m?'bg-white shadow text-blue-600':'text-slate-500'}`}>
+              <i className={`fas ${ic} mr-1.5`}></i>{l}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-3">
+          {loginMode === 'student' ? (
+            <>
+              <input value={fName} onChange={e=>setFName(e.target.value)} placeholder="ชื่อ - นามสกุล"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"/>
+              <input value={fRoom} onChange={e=>setFRoom(e.target.value)} placeholder="ห้อง (เช่น ม.1/2)"
+                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"/>
+            </>
+          ) : (
+            <input type="password" value={fPass} onChange={e=>setFPass(e.target.value)} placeholder="รหัสผ่านครู"
+              className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none"/>
+          )}
+          <button type="submit"
+            className="w-full py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-bold shadow-lg active:scale-95 transition">
+            เข้าสู่ระบบ <i className="fas fa-arrow-right ml-1"></i>
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+
+  /* ---------- MAIN ---------- */
+  return (
+    <div className="min-h-screen bg-slate-100 pb-24">
+      <Toast toast={toast} />
+      {preview && (
+        <div onClick={()=>setPreview(null)} className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4">
+          <img src={preview} className="max-h-[85vh] max-w-full rounded-xl shadow-2xl" alt=""/>
+          <button className="absolute top-5 right-5 text-white text-2xl"><i className="fas fa-xmark"></i></button>
+        </div>
+      )}
+
+      {/* HEADER */}
+      <header className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-5 pt-6 pb-16 rounded-b-3xl shadow-lg">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 min-w-0">
+            {(activeTab !== 'home') && (
+              <button onClick={()=>backRef.current()} className="w-9 h-9 rounded-full bg-white/20 flex-shrink-0 active:scale-90 transition">
+                <i className="fas fa-chevron-left"></i>
+              </button>
+            )}
+            <div className="min-w-0">
+              <p className="text-[11px] text-white/70">{user.role==='teacher'?'โหมดคุณครู':`ห้อง ${user.room}`}</p>
+              <h1 className="text-lg font-bold truncate">{user.name}</h1>
+            </div>
+          </div>
+          <button onClick={handleLogout} className="w-9 h-9 rounded-full bg-white/20 active:scale-90 transition">
+            <i className="fas fa-right-from-bracket"></i>
+          </button>
+        </div>
+      </header>
+
+      <main className="px-4 -mt-10">
+        {/* ============ STUDENT : HOME ============ */}
+        {user.role==='student' && activeTab==='home' && (
+          <div className="fade-in space-y-4">
+            <div className="bg-white rounded-2xl shadow-lg p-5 grid grid-cols-3 divide-x divide-slate-100 text-center">
+              <div><p className="text-3xl font-extrabold text-blue-600">{myPoints}</p><p className="text-[11px] text-slate-500">คะแนนสะสม</p></div>
+              <div><p className="text-3xl font-extrabold text-amber-500">{myPending}</p><p className="text-[11px] text-slate-500">รอตรวจ</p></div>
+              <div><p className="text-3xl font-extrabold text-emerald-500">{myRank>0?`#${myRank}`:'-'}</p><p className="text-[11px] text-slate-500">อันดับ</p></div>
+            </div>
+
+            <h2 className="font-bold text-slate-700 px-1 pt-1"><i className="fas fa-bolt text-amber-500 mr-2"></i>เลือกกิจกรรม</h2>
+            <div className="grid grid-cols-2 gap-3">
+              {ACTIVITIES.map(a => (
+                <button key={a.id} onClick={() => navigate('activity', a)}
+                  className={`bg-gradient-to-br ${a.grad} text-white rounded-2xl p-4 text-left shadow-md active:scale-95 transition`}>
+                  <i className={`fas ${a.icon} text-2xl mb-6 block`}></i>
+                  <p className="font-bold leading-tight">{a.name}</p>
+                  <p className="text-[10px] text-white/80 mt-1">+{a.points} คะแนน</p>
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => navigate('leaderboard')} className="bg-white rounded-2xl p-4 shadow font-semibold text-slate-700 active:scale-95 transition">
+                <i className="fas fa-trophy text-amber-500 mr-2"></i>อันดับ
+              </button>
+              <button onClick={() => navigate('history')} className="bg-white rounded-2xl p-4 shadow font-semibold text-slate-700 active:scale-95 transition">
+                <i className="fas fa-clock-rotate-left text-blue-500 mr-2"></i>ประวัติ
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ============ STUDENT : ACTIVITY ============ */}
+        {user.role==='student' && activeTab==='activity' && selectedAct && (
+          <div className="fade-in space-y-4">
+            <div className={`bg-gradient-to-br ${selectedAct.grad} text-white rounded-2xl p-5 shadow-lg`}>
+              <i className={`fas ${selectedAct.icon} text-3xl`}></i>
+              <h2 className="text-xl font-bold mt-2">{selectedAct.name}</h2>
+              <p className="text-xs text-white/85">{selectedAct.desc}</p>
+            </div>
+
+            {selectedAct.type === 'gps' ? (
+              <div className="bg-white rounded-2xl shadow p-6 text-center">
+                <div className="relative inline-block">
+                  {isTracking && <span className="absolute inset-0 rounded-full bg-blue-400 pulse-ring"></span>}
+                  <p className="relative text-5xl font-extrabold text-blue-600">{distance.toFixed(2)}</p>
+                </div>
+                <p className="text-slate-400 text-sm">กิโลเมตร</p>
+                <p className="text-2xl font-mono font-bold text-slate-700 mt-3">{formatTime(elapsedTime)}</p>
+                {gpsAcc !== null && (
+                  <p className={`text-[11px] mt-1 ${gpsAcc>50?'text-red-500':'text-emerald-600'}`}>
+                    <i className="fas fa-satellite-dish mr-1"></i>ความแม่นยำ ±{gpsAcc} ม.
+                  </p>
+                )}
+                <button onClick={isTracking ? stopRunning : startRunning}
+                  className={`w-full mt-5 py-4 rounded-xl font-bold text-white shadow-lg active:scale-95 transition ${isTracking?'bg-red-500':'bg-blue-600'}`}>
+                  <i className={`fas ${isTracking?'fa-stop':'fa-play'} mr-2`}></i>{isTracking?'หยุดจับเวลา':'เริ่มวิ่ง'}
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white rounded-2xl shadow p-5 space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <PhotoSlot label="ก่อนเริ่ม" img={imgBefore} time={timeBefore} onPick={e=>handleUpload(e,1)} onView={setPreview} disabled={busy}/>
+                  <PhotoSlot label="หลังเสร็จ" img={imgAfter} time={timeAfter} onPick={e=>handleUpload(e,2)} onView={setPreview} disabled={busy||!imgBefore}/>
+                </div>
+                <div className={`rounded-xl p-3 text-center text-sm font-semibold ${timeDiffMinutes>=selectedAct.minMin?'bg-emerald-50 text-emerald-700':'bg-amber-50 text-amber-700'}`}>
+                  <i className="fas fa-stopwatch mr-1.5"></i>
+                  ระยะเวลา {timeDiffMinutes} / {selectedAct.minMin} นาที
+                </div>
+              </div>
+            )}
+
+            <button onClick={submitTask} disabled={busy}
+              className="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-500 to-green-600 text-white font-bold shadow-lg active:scale-95 transition disabled:opacity-50">
+              {busy ? <><i className="fas fa-spinner fa-spin mr-2"></i>กำลังส่ง...</> : <><i className="fas fa-paper-plane mr-2"></i>ส่งให้ครูตรวจ</>}
+            </button>
+            <button onClick={resetActivity} className="w-full py-3 rounded-xl bg-white text-slate-600 font-semibold shadow active:scale-95 transition">
+              <i className="fas fa-arrow-left mr-2"></i>ย้อนกลับ
+            </button>
+          </div>
+        )}
+
+        {/* 🔧 FIX #5 — fallback กันจอขาว ถ้าหลุดมาโดยไม่มีกิจกรรม */}
+        {user.role==='student' && activeTab==='activity' && !selectedAct && (
+          <div className="bg-white rounded-2xl shadow p-10 text-center fade-in">
+            <i className="fas fa-inbox text-4xl text-slate-300 mb-3"></i>
+            <p className="text-slate-500">ไม่พบกิจกรรมที่เลือก</p>
+            <button onClick={()=>setActiveTab('home')} className="mt-4 px-6 py-2.5 bg-blue-600 text-white rounded-xl font-semibold">กลับหน้าหลัก</button>
+          </div>
+        )}
+
+        {/* ============ LEADERBOARD ============ */}
+        {activeTab==='leaderboard' && (
+          <div className="bg-white rounded-2xl shadow p-4 fade-in">
+            <h2 className="font-bold text-slate-700 mb-3"><i className="fas fa-trophy text-amber-500 mr-2"></i>อันดับคะแนน Top 10</h2>
+            {loadingData ? <Loading/> : leaderboard.length===0 ? <Empty text="ยังไม่มีข้อมูล"/> : (
+              <div className="space-y-2">
+                {leaderboard.map((r,i) => (
+                  <div key={r.name} className={`flex items-center gap-3 p-3 rounded-xl ${r.name===user.name?'bg-blue-50 ring-1 ring-blue-200':'bg-slate-50'}`}>
+                    <span className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm text-white flex-shrink-0
+                      ${i===0?'bg-amber-400':i===1?'bg-slate-400':i===2?'bg-orange-400':'bg-slate-300'}`}>{i+1}</span>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-slate-800 truncate text-sm">{r.name}</p>
+                      <p className="text-[11px] text-slate-400">ห้อง {r.room} · {r.count} กิจกรรม</p>
+                    </div>
+                    <span className="font-extrabold text-blue-600">{r.points}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============ HISTORY ============ */}
+        {activeTab==='history' && (
+          <div className="bg-white rounded-2xl shadow p-4 fade-in">
+            <h2 className="font-bold text-slate-700 mb-3"><i className="fas fa-clock-rotate-left text-blue-500 mr-2"></i>ประวัติของฉัน</h2>
+            {loadingData ? <Loading/> : myTasks.length===0 ? <Empty text="ยังไม่มีรายการ"/> : (
+              <div className="space-y-2">
+                {myTasks.map(t => (
+                  <div key={t.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+                    <i className={`fas ${actById(t.activityId)?.icon||'fa-star'} text-slate-400 w-6 text-center`}></i>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm text-slate-800 truncate">{t.activityName}</p>
+                      <p className="text-[11px] text-slate-400">{fmtDT(t.createdAt)}</p>
+                    </div>
+                    <StatusBadge s={t.status}/>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ============ TEACHER : REVIEW ============ */}
+        {user.role==='teacher' && activeTab==='review' && (
+          <div className="space-y-3 fade-in">
+            <div className="bg-white rounded-2xl shadow p-4 flex items-center justify-between">
+              <span className="font-bold text-slate-700"><i className="fas fa-clipboard-check text-blue-500 mr-2"></i>รอตรวจสอบ</span>
+              <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-sm font-bold">{pendingAll.length}</span>
+            </div>
+            {loadingData ? <Loading/> : pendingAll.length===0 ? (
+              <div className="bg-white rounded-2xl shadow p-10 text-center">
+                <i className="fas fa-circle-check text-5xl text-emerald-400 mb-3"></i>
+                <p className="text-slate-500">ตรวจครบทุกรายการแล้ว 🎉</p>
+              </div>
+            ) : pendingAll.map(t => (
+              <div key={t.id} className="bg-white rounded-2xl shadow p-4">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-bold text-slate-800 truncate">{t.studentName}</p>
+                    <p className="text-[11px] text-slate-400">ห้อง {t.room} · {fmtDT(t.createdAt)}</p>
+                  </div>
+                  <span className="text-xs bg-blue-50 text-blue-600 px-2 py-1 rounded-lg font-semibold whitespace-nowrap">+{t.points}</span>
+                </div>
+                <p className="text-sm text-slate-600 mt-2">
+                  <i className={`fas ${actById(t.activityId)?.icon||'fa-star'} mr-1.5`}></i>{t.activityName}
+                  {t.distance != null && <span className="ml-2 text-blue-600 font-semibold">{t.distance} กม.</span>}
+                  {t.duration ? <span className="ml-2 text-slate-500">{Math.round(t.duration/60)} นาที</span> : null}
+                </p>
+                {(t.imgBefore || t.imgAfter) && (
+                  <div className="grid grid-cols-2 gap-2 mt-3">
+                    {[['ก่อน',t.imgBefore,t.timeBefore],['หลัง',t.imgAfter,t.timeAfter]].map(([l,src,tm]) => src && (
+                      <div key={l} onClick={()=>setPreview(src)} className="cursor-pointer">
+                        <img src={src} className="w-full h-28 object-cover rounded-lg" alt={l}/>
+                        <p className="text-[10px] text-slate-400 mt-1">{l} · {fmtDT(tm)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-2 mt-3">
+                  <button onClick={()=>review(t.id,'rejected')} className="py-2.5 rounded-xl bg-red-50 text-red-600 font-bold active:scale-95 transition">
+                    <i className="fas fa-xmark mr-1"></i>ปฏิเสธ
+                  </button>
+                  <button onClick={()=>review(t.id,'approved')} className="py-2.5 rounded-xl bg-emerald-500 text-white font-bold active:scale-95 transition">
+                    <i className="fas fa-check mr-1"></i>อนุมัติ
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {/* BOTTOM NAV */}
+      <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex shadow-2xl">
+        {(user.role === 'student'
+          ? [['home','หน้าหลัก','fa-house'],['leaderboard','อันดับ','fa-trophy'],['history','ประวัติ','fa-clock-rotate-left']]
+          : [['review','ตรวจงาน','fa-clipboard-check'],['leaderboard','อันดับ','fa-trophy']]
+        ).map(([tab,label,ic]) => (
+          <button key={tab} onClick={()=>{ if(activeTab==='activity') resetActivity(); navigate(tab); }}
+            className={`flex-1 py-3 transition ${activeTab===tab?'text-blue-600':'text-slate-400'}`}>
+            <i className={`fas ${ic} text-lg block`}></i>
+            <span className="text-[10px] font-semibold">{label}</span>
+          </button>
+        ))}
+      </nav>
+    </div>
+  );
+}
+
+/* ============================================================
+   5) SMALL COMPONENTS
+============================================================ */
+function Toast({ toast }) {
+  if (!toast) return null;
+  const ok = toast.type === 'success';
+  return (
+    <div className="fixed top-4 inset-x-0 z-[60] flex justify-center px-4 pointer-events-none">
+      <div className={`toast-in px-5 py-3 rounded-xl shadow-2xl text-white text-sm font-semibold max-w-sm ${ok?'bg-emerald-500':'bg-red-500'}`}>
+        <i className={`fas ${ok?'fa-circle-check':'fa-circle-exclamation'} mr-2`}></i>{toast.msg}
+      </div>
+    </div>
+  );
+}
+const Loading = () => (
+  <div className="py-10 text-center text-slate-400"><i className="fas fa-spinner fa-spin text-2xl"></i><p className="text-sm mt-2">กำลังโหลด...</p></div>
+);
+const Empty = ({ text }) => (
+  <div className="py-10 text-center text-slate-400"><i className="fas fa-inbox text-3xl mb-2"></i><p className="text-sm">{text}</p></div>
+);
+const StatusBadge = ({ s }) => {
+  const map = { approved:['bg-emerald-100 text-emerald-700','อนุมัติ'], pending:['bg-amber-100 text-amber-700','รอตรวจ'], rejected:['bg-red-100 text-red-700','ไม่ผ่าน'] };
+  const [cls, txt] = map[s] || map.pending;
+  return <span className={`text-[11px] px-2.5 py-1 rounded-full font-bold whitespace-nowrap ${cls}`}>{txt}</span>;
+};
+function PhotoSlot({ label, img, time, onPick, onView, disabled }) {
+  const id = 'f_' + label;
+  return (
+    <div>
+      <p className="text-xs font-semibold text-slate-500 mb-1.5">{label}</p>
+      {img ? (
+        <div onClick={()=>onView(img)} className="relative cursor-pointer">
+          <img src={img} className="w-full h-32 object-cover rounded-xl" alt={label}/>
+          <span className="absolute bottom-1 left-1 bg-black/60 text-white text-[9px] px-1.5 py-0.5 rounded">{fmtDT(time)}</span>
+        </div>
+      ) : (
+        <label htmlFor={id} className={`h-32 rounded-xl border-2 border-dashed flex flex-col items-center justify-center
+          ${disabled?'border-slate-200 text-slate-300':'border-blue-300 text-blue-500 cursor-pointer active:scale-95'} transition`}>
+          <i className="fas fa-camera text-2xl"></i>
+          <span className="text-[11px] mt-1 font-semibold">แตะเพื่อถ่ายรูป</span>
+        </label>
+      )}
+      <input id={id} type="file" accept="image/*" capture="environment" disabled={disabled} onChange={onPick} className="hidden"/>
+    </div>
+  );
+}
+
+/* ============================================================
+   6) MOUNT
+============================================================ */
+ReactDOM.createRoot(document.getElementById('root'))
+  .render(<ErrorBoundary><App/></ErrorBoundary>);
+</script>
+</body>
+</html>
