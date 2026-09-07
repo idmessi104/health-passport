@@ -33,7 +33,7 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
 /* ============================================================
    1) CONFIG
 ============================================================ */
-// 👇 วาง config ของคุณตรงนี้ (ก๊อปจากไฟล์เดิม)
+// 👇 วาง config ของคุณตรงนี้
 const firebaseConfig = {
   apiKey: "AIza...........",
   authDomain: "health-passport-school.firebaseapp.com",
@@ -46,6 +46,17 @@ const firebaseConfig = {
 const TASKS_PATH = 'artifacts/health-passport-final/public/data/tasks';
 const TEACHER_PASSWORD = '191919';
 const LS_KEY = 'hp_user_v2';
+
+/* 🎯 พารามิเตอร์กัน GPS drift — ปรับได้ตามหน้างาน */
+const GPS = {
+  maxAccuracy: 25,     // ม. — สัญญาณแย่กว่านี้ = ไม่นับ
+  warmupFixes: 3,      // ทิ้งจุดแรกๆ ตอนเพิ่งจับสัญญาณ
+  minMove: 8,          // ม. — ขยับน้อยกว่านี้ = ถือว่านิ่ง
+  noiseFactor: 1.2,    // ระยะต้องชนะ (ความแม่นยำ × ค่านี้)
+  minSpeed: 0.6,       // m/s — ช้ากว่านี้ = ยืนนิ่ง (เดินเร็ว ≈ 1.4)
+  maxSpeed: 8,         // m/s — เร็วกว่านี้ = ผิดปกติ (≈ 28 กม./ชม.)
+  moveStreak: 2,       // ต้องขยับติดกันกี่ครั้งถึงเริ่มนับ
+};
 
 let db = null, auth = null, initError = null;
 try {
@@ -69,8 +80,8 @@ const actById = (id) => ACTIVITIES.find(a => a.id === id);
 /* ============================================================
    2) HELPERS
 ============================================================ */
-function getDistance(lat1, lon1, lat2, lon2) {
-  const R = 6371, toRad = d => d * Math.PI / 180;
+function getDistanceM(lat1, lon1, lat2, lon2) {          // คืนค่าเป็น "เมตร"
+  const R = 6371000, toRad = d => d * Math.PI / 180;
   const dLat = toRad(lat2 - lat1), dLon = toRad(lon2 - lon1);
   const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
@@ -102,7 +113,7 @@ function compressImage(file, maxSize = 500, quality = 0.7) {
 }
 
 /* ============================================================
-   3) ERROR BOUNDARY  ← กันจอขาวจาก error ที่หลุดมา
+   3) ERROR BOUNDARY
 ============================================================ */
 class ErrorBoundary extends React.Component {
   constructor(p){ super(p); this.state = { err:null }; }
@@ -130,36 +141,39 @@ class ErrorBoundary extends React.Component {
    4) APP
 ============================================================ */
 function App() {
-  /* ---- auth / user ---- */
   const [booting, setBooting] = useState(true);
-  const [user, setUser] = useState(null);            // {name, room, role}
+  const [user, setUser] = useState(null);
   const [loginMode, setLoginMode] = useState('student');
   const [fName, setFName] = useState('');
   const [fRoom, setFRoom] = useState('');
   const [fPass, setFPass] = useState('');
 
-  /* ---- navigation ---- */
   const [activeTab, setActiveTab] = useState('home');
   const [selectedAct, setSelectedAct] = useState(null);
 
-  /* ---- activity ---- */
   const [isTracking, setIsTracking] = useState(false);
-  const [distance, setDistance] = useState(0);
-  const [elapsedTime, setElapsedTime] = useState(0);
+  const [distance, setDistance] = useState(0);          // กม.
+  const [elapsedTime, setElapsedTime] = useState(0);    // วินาทีทั้งหมด
+  const [movingTime, setMovingTime] = useState(0);      // วินาทีที่ขยับจริง
   const [gpsAcc, setGpsAcc] = useState(null);
+  const [gpsState, setGpsState] = useState('idle');     // warmup | weak | idle | moving
   const [imgBefore, setImgBefore] = useState(null);
   const [imgAfter, setImgAfter] = useState(null);
   const [timeBefore, setTimeBefore] = useState(null);
   const [timeAfter, setTimeAfter] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  /* ---- data ---- */
   const [tasks, setTasks] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
   const [preview, setPreview] = useState(null);
   const [toast, setToast] = useState(null);
 
-  const watchRef = useRef(null), timerRef = useRef(null), lastPos = useRef(null), toastRef = useRef(null);
+  const watchRef = useRef(null), timerRef = useRef(null), toastRef = useRef(null);
+  const lastPos  = useRef(null);      // {lat,lng,t,acc}
+  const warmup   = useRef(0);
+  const streak   = useRef(0);
+  const pending  = useRef(0);         // เมตรที่พักไว้รอยืนยัน
+  const movingAt = useRef(0);         // timestamp ครั้งล่าสุดที่นับว่าขยับ
 
   const showToast = useCallback((msg, type='success') => {
     setToast({ msg, type });
@@ -180,7 +194,7 @@ function App() {
     auth.signInAnonymously().catch(e => console.warn('anon auth:', e.message)).finally(() => setBooting(false));
   }, []);
 
-  /* ---------- firestore listener ---------- */
+  /* ---------- firestore ---------- */
   useEffect(() => {
     if (!user || !db) return;
     setLoadingData(true);
@@ -191,44 +205,28 @@ function App() {
     return () => unsub();
   }, [user, showToast]);
 
-  /* ============================================================
-     🔧 FIX #1 — ปิด GPS ทุกครั้งที่ออกจากหน้ากิจกรรม
-  ============================================================ */
   const stopWatchers = useCallback(() => {
     if (watchRef.current !== null) { navigator.geolocation.clearWatch(watchRef.current); watchRef.current = null; }
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    lastPos.current = null;
+    lastPos.current = null; warmup.current = 0; streak.current = 0; pending.current = 0; movingAt.current = 0;
   }, []);
   useEffect(() => () => stopWatchers(), [stopWatchers]);
 
-  /* ============================================================
-     🔧 FIX #2 — resetActivity ต้องดึง activeTab กลับ home ด้วย
-  ============================================================ */
   const resetActivity = useCallback(() => {
     stopWatchers();
-    setSelectedAct(null);
-    setIsTracking(false);
-    setDistance(0); setElapsedTime(0); setGpsAcc(null);
-    setImgBefore(null); setImgAfter(null);
-    setTimeBefore(null); setTimeAfter(null);
-    setBusy(false);
-    setActiveTab('home');          // ✅ บรรทัดที่หายไป = ต้นเหตุจอขาว
+    setSelectedAct(null); setIsTracking(false);
+    setDistance(0); setElapsedTime(0); setMovingTime(0); setGpsAcc(null); setGpsState('idle');
+    setImgBefore(null); setImgAfter(null); setTimeBefore(null); setTimeAfter(null);
+    setBusy(false); setActiveTab('home');
   }, [stopWatchers]);
 
-  /* ============================================================
-     🔧 FIX #3 — Safety net: ถ้า tab=activity แต่ไม่มีกิจกรรม เด้งกลับ home
-  ============================================================ */
   useEffect(() => {
     if (activeTab === 'activity' && !selectedAct) setActiveTab('home');
     if (activeTab === 'review' && user?.role !== 'teacher') setActiveTab('home');
   }, [activeTab, selectedAct, user]);
 
-  /* ============================================================
-     🔧 FIX #4 — รองรับปุ่ม Back ของมือถือ/เบราว์เซอร์
-  ============================================================ */
   const navigate = useCallback((tab, act = null) => {
-    setActiveTab(tab);
-    setSelectedAct(act);
+    setActiveTab(tab); setSelectedAct(act);
     window.history.pushState({ hp: true, tab }, '');
   }, []);
 
@@ -242,7 +240,7 @@ function App() {
     }
     if (activeTab === 'activity') resetActivity();
     else if (activeTab !== 'home') setActiveTab('home');
-    else window.history.pushState({ hp:true, tab:'home' }, '');   // อยู่ home แล้ว ไม่ให้หลุดออกแอพ
+    else window.history.pushState({ hp:true, tab:'home' }, '');
   };
 
   useEffect(() => {
@@ -274,27 +272,85 @@ function App() {
     setUser(null); setTasks([]); setActiveTab('home'); setSelectedAct(null);
   };
 
-  /* ---------- GPS ---------- */
+  /* ============================================================
+     🎯 GPS ANTI-DRIFT ENGINE
+  ============================================================ */
+  const onPosition = useCallback((pos) => {
+    const { latitude: lat, longitude: lng, accuracy: acc, speed: devSpeed } = pos.coords;
+    const t = pos.timestamp || Date.now();
+    setGpsAcc(Math.round(acc));
+
+    /* ด่าน 1 — warm-up: ทิ้งจุดแรกๆ ที่ยังเพี้ยน */
+    if (warmup.current < GPS.warmupFixes) {
+      warmup.current++;
+      lastPos.current = { lat, lng, t, acc };
+      setGpsState('warmup');
+      return;
+    }
+
+    /* ด่าน 2 — accuracy gate: สัญญาณอ่อนไม่นับ */
+    if (acc > GPS.maxAccuracy) { setGpsState('weak'); streak.current = 0; return; }
+
+    const prev = lastPos.current;
+    if (!prev) { lastPos.current = { lat, lng, t, acc }; return; }
+
+    const dt = (t - prev.t) / 1000;
+    if (dt < 1) return;                       // ถี่เกินไป ข้าม
+
+    const d = getDistanceM(prev.lat, prev.lng, lat, lng);
+
+    /* ด่าน 3 — noise floor: ระยะต้องชนะรัศมีความคลาดเคลื่อน  ← ตัวหลักที่แก้ปัญหา */
+    const noiseFloor = Math.max(GPS.minMove, ((acc + prev.acc) / 2) * GPS.noiseFactor);
+    if (d < noiseFloor) {
+      setGpsState('idle');
+      streak.current = 0; pending.current = 0;
+      return;                                 // ⚠️ ไม่อัปเดต lastPos → กัน anchor ไหลตาม drift
+    }
+
+    /* ด่าน 4 — speed gate */
+    const v = d / dt;
+    if (v > GPS.maxSpeed) {                   // กระโดดผิดปกติ: ทิ้งระยะ แต่ย้าย anchor ตาม
+      lastPos.current = { lat, lng, t, acc };
+      streak.current = 0; pending.current = 0;
+      setGpsState('idle');
+      return;
+    }
+    if (v < GPS.minSpeed) { setGpsState('idle'); streak.current = 0; pending.current = 0; return; }
+    if (typeof devSpeed === 'number' && devSpeed >= 0 && devSpeed < 0.4) {
+      setGpsState('idle'); streak.current = 0; pending.current = 0; return;
+    }
+
+    /* ด่าน 5 — ต้องขยับติดกันหลายครั้งถึงเริ่มนับ */
+    lastPos.current = { lat, lng, t, acc };
+    streak.current++;
+    if (streak.current < GPS.moveStreak) { pending.current += d; setGpsState('idle'); return; }
+
+    const add = d + pending.current;
+    pending.current = 0;
+    setDistance(x => x + add / 1000);
+    movingAt.current = Date.now();
+    setGpsState('moving');
+  }, []);
+
   const startRunning = () => {
     if (!navigator.geolocation) return showToast('อุปกรณ์ไม่รองรับ GPS', 'error');
-    setDistance(0); setElapsedTime(0); lastPos.current = null; setIsTracking(true);
-    timerRef.current = setInterval(() => setElapsedTime(t => t + 1), 1000);
+    setDistance(0); setElapsedTime(0); setMovingTime(0); setGpsState('warmup');
+    lastPos.current = null; warmup.current = 0; streak.current = 0; pending.current = 0; movingAt.current = 0;
+    setIsTracking(true);
+
+    timerRef.current = setInterval(() => {
+      setElapsedTime(t => t + 1);
+      if (Date.now() - movingAt.current < 6000) setMovingTime(t => t + 1);
+    }, 1000);
+
     watchRef.current = navigator.geolocation.watchPosition(
-      pos => {
-        const { latitude, longitude, accuracy } = pos.coords;
-        setGpsAcc(Math.round(accuracy));
-        if (accuracy > 50) return;                       // สัญญาณแย่ ข้ามจุดนี้
-        if (lastPos.current) {
-          const d = getDistance(lastPos.current.lat, lastPos.current.lng, latitude, longitude);
-          if (d > 0.002 && d < 0.2) setDistance(x => x + d);   // กันจุดเพี้ยน
-        }
-        lastPos.current = { lat: latitude, lng: longitude };
-      },
-      err => { showToast('GPS: ' + err.message, 'error'); },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 }
+      onPosition,
+      err => showToast('GPS: ' + err.message, 'error'),
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
     );
+    showToast('กำลังจับสัญญาณ GPS...');
   };
-  const stopRunning = () => { stopWatchers(); setIsTracking(false); };
+  const stopRunning = () => { stopWatchers(); setIsTracking(false); setGpsState('idle'); };
 
   /* ---------- upload ---------- */
   const handleUpload = async (e, slot) => {
@@ -313,7 +369,7 @@ function App() {
     if (!selectedAct || !user) return;
     const a = selectedAct;
     if (a.type === 'gps') {
-      if (isTracking) return showToast('กรุณากดหยุดก่อนส่ง', 'error');
+      if (isTracking) return showToast('กรุณากดหยุดจับเวลาก่อนส่ง', 'error');
       if (distance < a.minKm) return showToast(`ระยะยังไม่ถึง ${a.minKm} กม.`, 'error');
     } else {
       if (!imgBefore || !imgAfter) return showToast('ต้องมีรูปครบทั้ง 2 ใบ', 'error');
@@ -327,6 +383,8 @@ function App() {
         status: 'pending',
         distance: a.type === 'gps' ? Number(distance.toFixed(2)) : null,
         duration: a.type === 'gps' ? elapsedTime : timeDiffMinutes * 60,
+        movingTime: a.type === 'gps' ? movingTime : null,
+        avgPace: a.type === 'gps' && distance > 0 ? Number((elapsedTime / 60 / distance).toFixed(2)) : null,
         imgBefore: imgBefore || null, imgAfter: imgAfter || null,
         timeBefore: timeBefore || null, timeAfter: timeAfter || null,
         createdAt: Date.now(),
@@ -338,12 +396,9 @@ function App() {
     finally { setBusy(false); }
   };
 
-  /* ---------- teacher ---------- */
   const review = async (id, status) => {
     try {
-      await db.collection(TASKS_PATH).doc(id).update({
-        status, reviewedAt: Date.now(), reviewedBy: user.name
-      });
+      await db.collection(TASKS_PATH).doc(id).update({ status, reviewedAt: Date.now(), reviewedBy: user.name });
       showToast(status === 'approved' ? 'อนุมัติแล้ว ✅' : 'ปฏิเสธแล้ว ❌', status === 'approved' ? 'success' : 'error');
     } catch (err) { showToast('อัปเดตไม่สำเร็จ: ' + err.code, 'error'); }
   };
@@ -355,10 +410,7 @@ function App() {
   );
   const myPoints  = useMemo(() => myTasks.filter(t=>t.status==='approved').reduce((s,t)=>s+(t.points||0),0), [myTasks]);
   const myPending = useMemo(() => myTasks.filter(t=>t.status==='pending').length, [myTasks]);
-  const pendingAll = useMemo(
-    () => tasks.filter(t => t.status === 'pending').sort((a,b) => (a.createdAt||0)-(b.createdAt||0)),
-    [tasks]
-  );
+  const pendingAll = useMemo(() => tasks.filter(t => t.status === 'pending').sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)), [tasks]);
   const leaderboard = useMemo(() => {
     const m = {};
     tasks.filter(t => t.status === 'approved').forEach(t => {
@@ -369,6 +421,13 @@ function App() {
     return Object.values(m).sort((a,b) => b.points - a.points).slice(0, 10);
   }, [tasks]);
   const myRank = useMemo(() => leaderboard.findIndex(r => r.name === user?.name) + 1, [leaderboard, user]);
+
+  const gpsInfo = {
+    warmup: ['text-amber-600','fa-satellite','กำลังจับสัญญาณ...'],
+    weak:   ['text-red-500','fa-triangle-exclamation',`สัญญาณอ่อน (±${gpsAcc} ม.) ยังไม่นับระยะ`],
+    idle:   ['text-slate-400','fa-pause','อยู่นิ่ง — ไม่นับระยะ'],
+    moving: ['text-emerald-600','fa-person-running','กำลังเคลื่อนที่'],
+  }[gpsState] || ['text-slate-400','fa-satellite-dish','-'];
 
   /* ============================================================
      RENDER
@@ -390,7 +449,6 @@ function App() {
     </div>
   );
 
-  /* ---------- LOGIN ---------- */
   if (!user) return (
     <div className="min-h-screen bg-gradient-to-br from-blue-600 via-cyan-500 to-teal-400 flex items-center justify-center p-5">
       <Toast toast={toast} />
@@ -402,7 +460,6 @@ function App() {
           <h1 className="text-2xl font-extrabold text-slate-800 mt-3">Health Passport</h1>
           <p className="text-xs text-slate-500">สมุดบันทึกสุขภาพนักเรียน</p>
         </div>
-
         <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl mb-5">
           {[['student','นักเรียน','fa-child-reaching'],['teacher','คุณครู','fa-chalkboard-user']].map(([m,l,ic]) => (
             <button key={m} onClick={() => setLoginMode(m)}
@@ -411,7 +468,6 @@ function App() {
             </button>
           ))}
         </div>
-
         <form onSubmit={handleLogin} className="space-y-3">
           {loginMode === 'student' ? (
             <>
@@ -433,7 +489,6 @@ function App() {
     </div>
   );
 
-  /* ---------- MAIN ---------- */
   return (
     <div className="min-h-screen bg-slate-100 pb-24">
       <Toast toast={toast} />
@@ -444,7 +499,6 @@ function App() {
         </div>
       )}
 
-      {/* HEADER */}
       <header className="bg-gradient-to-r from-blue-600 to-cyan-500 text-white px-5 pt-6 pb-16 rounded-b-3xl shadow-lg">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2 min-w-0">
@@ -465,7 +519,6 @@ function App() {
       </header>
 
       <main className="px-4 -mt-10">
-        {/* ============ STUDENT : HOME ============ */}
         {user.role==='student' && activeTab==='home' && (
           <div className="fade-in space-y-4">
             <div className="bg-white rounded-2xl shadow-lg p-5 grid grid-cols-3 divide-x divide-slate-100 text-center">
@@ -473,7 +526,6 @@ function App() {
               <div><p className="text-3xl font-extrabold text-amber-500">{myPending}</p><p className="text-[11px] text-slate-500">รอตรวจ</p></div>
               <div><p className="text-3xl font-extrabold text-emerald-500">{myRank>0?`#${myRank}`:'-'}</p><p className="text-[11px] text-slate-500">อันดับ</p></div>
             </div>
-
             <h2 className="font-bold text-slate-700 px-1 pt-1"><i className="fas fa-bolt text-amber-500 mr-2"></i>เลือกกิจกรรม</h2>
             <div className="grid grid-cols-2 gap-3">
               {ACTIVITIES.map(a => (
@@ -485,7 +537,6 @@ function App() {
                 </button>
               ))}
             </div>
-
             <div className="grid grid-cols-2 gap-3">
               <button onClick={() => navigate('leaderboard')} className="bg-white rounded-2xl p-4 shadow font-semibold text-slate-700 active:scale-95 transition">
                 <i className="fas fa-trophy text-amber-500 mr-2"></i>อันดับ
@@ -497,7 +548,6 @@ function App() {
           </div>
         )}
 
-        {/* ============ STUDENT : ACTIVITY ============ */}
         {user.role==='student' && activeTab==='activity' && selectedAct && (
           <div className="fade-in space-y-4">
             <div className={`bg-gradient-to-br ${selectedAct.grad} text-white rounded-2xl p-5 shadow-lg`}>
@@ -509,20 +559,40 @@ function App() {
             {selectedAct.type === 'gps' ? (
               <div className="bg-white rounded-2xl shadow p-6 text-center">
                 <div className="relative inline-block">
-                  {isTracking && <span className="absolute inset-0 rounded-full bg-blue-400 pulse-ring"></span>}
+                  {isTracking && gpsState==='moving' && <span className="absolute inset-0 rounded-full bg-blue-400 pulse-ring"></span>}
                   <p className="relative text-5xl font-extrabold text-blue-600">{distance.toFixed(2)}</p>
                 </div>
                 <p className="text-slate-400 text-sm">กิโลเมตร</p>
-                <p className="text-2xl font-mono font-bold text-slate-700 mt-3">{formatTime(elapsedTime)}</p>
-                {gpsAcc !== null && (
-                  <p className={`text-[11px] mt-1 ${gpsAcc>50?'text-red-500':'text-emerald-600'}`}>
-                    <i className="fas fa-satellite-dish mr-1"></i>ความแม่นยำ ±{gpsAcc} ม.
-                  </p>
+
+                <div className="grid grid-cols-2 gap-2 mt-4">
+                  <div className="bg-slate-50 rounded-xl py-2">
+                    <p className="text-xl font-mono font-bold text-slate-700">{formatTime(elapsedTime)}</p>
+                    <p className="text-[10px] text-slate-400">เวลาทั้งหมด</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl py-2">
+                    <p className="text-xl font-mono font-bold text-emerald-600">{formatTime(movingTime)}</p>
+                    <p className="text-[10px] text-slate-400">เวลาที่เคลื่อนที่</p>
+                  </div>
+                </div>
+
+                {isTracking && (
+                  <div className={`mt-3 text-xs font-semibold ${gpsInfo[0]}`}>
+                    <i className={`fas ${gpsInfo[1]} mr-1.5`}></i>{gpsInfo[2]}
+                    {gpsAcc !== null && gpsState !== 'weak' && <span className="text-slate-400 font-normal ml-1">(±{gpsAcc} ม.)</span>}
+                  </div>
                 )}
+
                 <button onClick={isTracking ? stopRunning : startRunning}
                   className={`w-full mt-5 py-4 rounded-xl font-bold text-white shadow-lg active:scale-95 transition ${isTracking?'bg-red-500':'bg-blue-600'}`}>
                   <i className={`fas ${isTracking?'fa-stop':'fa-play'} mr-2`}></i>{isTracking?'หยุดจับเวลา':'เริ่มวิ่ง'}
                 </button>
+
+                {!isTracking && (
+                  <p className="text-[10px] text-slate-400 mt-3 leading-relaxed">
+                    <i className="fas fa-circle-info mr-1"></i>
+                    ระบบจะนับระยะเฉพาะตอนที่เคลื่อนที่จริงเท่านั้น<br/>แนะนำให้ออกมากลางแจ้งเพื่อให้สัญญาณแม่นยำ
+                  </p>
+                )}
               </div>
             ) : (
               <div className="bg-white rounded-2xl shadow p-5 space-y-4">
@@ -531,8 +601,7 @@ function App() {
                   <PhotoSlot label="หลังเสร็จ" img={imgAfter} time={timeAfter} onPick={e=>handleUpload(e,2)} onView={setPreview} disabled={busy||!imgBefore}/>
                 </div>
                 <div className={`rounded-xl p-3 text-center text-sm font-semibold ${timeDiffMinutes>=selectedAct.minMin?'bg-emerald-50 text-emerald-700':'bg-amber-50 text-amber-700'}`}>
-                  <i className="fas fa-stopwatch mr-1.5"></i>
-                  ระยะเวลา {timeDiffMinutes} / {selectedAct.minMin} นาที
+                  <i className="fas fa-stopwatch mr-1.5"></i>ระยะเวลา {timeDiffMinutes} / {selectedAct.minMin} นาที
                 </div>
               </div>
             )}
@@ -547,7 +616,6 @@ function App() {
           </div>
         )}
 
-        {/* 🔧 FIX #5 — fallback กันจอขาว ถ้าหลุดมาโดยไม่มีกิจกรรม */}
         {user.role==='student' && activeTab==='activity' && !selectedAct && (
           <div className="bg-white rounded-2xl shadow p-10 text-center fade-in">
             <i className="fas fa-inbox text-4xl text-slate-300 mb-3"></i>
@@ -556,7 +624,6 @@ function App() {
           </div>
         )}
 
-        {/* ============ LEADERBOARD ============ */}
         {activeTab==='leaderboard' && (
           <div className="bg-white rounded-2xl shadow p-4 fade-in">
             <h2 className="font-bold text-slate-700 mb-3"><i className="fas fa-trophy text-amber-500 mr-2"></i>อันดับคะแนน Top 10</h2>
@@ -578,7 +645,6 @@ function App() {
           </div>
         )}
 
-        {/* ============ HISTORY ============ */}
         {activeTab==='history' && (
           <div className="bg-white rounded-2xl shadow p-4 fade-in">
             <h2 className="font-bold text-slate-700 mb-3"><i className="fas fa-clock-rotate-left text-blue-500 mr-2"></i>ประวัติของฉัน</h2>
@@ -589,7 +655,7 @@ function App() {
                     <i className={`fas ${actById(t.activityId)?.icon||'fa-star'} text-slate-400 w-6 text-center`}></i>
                     <div className="flex-1 min-w-0">
                       <p className="font-semibold text-sm text-slate-800 truncate">{t.activityName}</p>
-                      <p className="text-[11px] text-slate-400">{fmtDT(t.createdAt)}</p>
+                      <p className="text-[11px] text-slate-400">{fmtDT(t.createdAt)}{t.distance!=null?` · ${t.distance} กม.`:''}</p>
                     </div>
                     <StatusBadge s={t.status}/>
                   </div>
@@ -599,7 +665,6 @@ function App() {
           </div>
         )}
 
-        {/* ============ TEACHER : REVIEW ============ */}
         {user.role==='teacher' && activeTab==='review' && (
           <div className="space-y-3 fade-in">
             <div className="bg-white rounded-2xl shadow p-4 flex items-center justify-between">
@@ -625,6 +690,12 @@ function App() {
                   {t.distance != null && <span className="ml-2 text-blue-600 font-semibold">{t.distance} กม.</span>}
                   {t.duration ? <span className="ml-2 text-slate-500">{Math.round(t.duration/60)} นาที</span> : null}
                 </p>
+                {t.avgPace != null && (
+                  <p className="text-[11px] text-slate-400 mt-1">
+                    <i className="fas fa-gauge-high mr-1"></i>เพซเฉลี่ย {t.avgPace} นาที/กม.
+                    {t.movingTime != null && ` · เคลื่อนที่จริง ${Math.round(t.movingTime/60)} นาที`}
+                  </p>
+                )}
                 {(t.imgBefore || t.imgAfter) && (
                   <div className="grid grid-cols-2 gap-2 mt-3">
                     {[['ก่อน',t.imgBefore,t.timeBefore],['หลัง',t.imgAfter,t.timeAfter]].map(([l,src,tm]) => src && (
@@ -649,7 +720,6 @@ function App() {
         )}
       </main>
 
-      {/* BOTTOM NAV */}
       <nav className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 flex shadow-2xl">
         {(user.role === 'student'
           ? [['home','หน้าหลัก','fa-house'],['leaderboard','อันดับ','fa-trophy'],['history','ประวัติ','fa-clock-rotate-left']]
