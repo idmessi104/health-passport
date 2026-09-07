@@ -92,7 +92,7 @@ const firebaseConfig = {
 };
 
 const TASKS_PATH = 'artifacts/health-passport-v5/public/data/tasks';
-const USERS_PATH = 'artifacts/health-passport-v5/public/data/users'; // เพิ่มคอลเลกชันผู้ใช้งาน
+const USERS_PATH = 'artifacts/health-passport-v5/public/data/users'; 
 const TEACHER_PASSWORD = '191919';
 const LS_KEY = 'hp_user_v5';
 
@@ -153,7 +153,6 @@ function compressImage(file, maxSize=560, quality=.72){
   });
 }
 
-// แยกฟังก์ชันคำนวณสถิติเพื่อใช้ทั้งหน้านักเรียนและหน้าครู
 function calcStats(approvedTasks) {
     const hpByDay = {}; const hpByType = {};
     approvedTasks.forEach(t=>{
@@ -294,7 +293,6 @@ function App(){
     if(activeTab==='review'&&user?.role!=='teacher') setActiveTab('home');
     if(activeTab==='scores'&&user?.role!=='teacher') setActiveTab('home');
     
-    // โหลด Draft รูปภาพ
     if (activeTab === 'activity' && selectedAct && selectedAct.type !== 'gps' && user) {
       const draftKey = `hp_draft_${user.name}_${selectedAct.id}`;
       const draftStr = localStorage.getItem(draftKey);
@@ -340,24 +338,41 @@ function App(){
       localStorage.setItem(LS_KEY,JSON.stringify(u)); setUser(u); setActiveTab('review'); return showToast('ยินดีต้อนรับคุณครู');
     }
     
-    if(!fName.trim() || !fNumber.trim() || !fGrade) return showToast('กรุณากรอกข้อมูลให้ครบถ้วน','error');
+    const nameKey = fName.trim();
+    const numKey = fNumber.trim();
+    const gradeKey = fGrade;
+
+    if(!nameKey || !numKey || !gradeKey) return showToast('กรุณากรอกข้อมูลให้ครบถ้วน','error');
     setBusy(true);
     
     try {
-       const userRef = db.collection(USERS_PATH).doc(fName.trim());
+       const userRef = db.collection(USERS_PATH).doc(nameKey);
        const doc = await userRef.get();
        
        if(doc.exists) {
           const data = doc.data();
-          if(data.studentNo !== fNumber.trim()) {
+          // ตรวจสอบว่าชื่อนี้ตรงกับเลขที่และชั้นเดิมหรือไม่ (ป้องกันกรอกผิดตอนล็อกอิน)
+          if(data.studentNo !== numKey || data.grade !== gradeKey) {
              setBusy(false);
-             return showToast('ชื่อนี้ถูกลงทะเบียนด้วยเลขที่อื่นแล้ว','error');
+             return showToast('ชื่อนี้ลงทะเบียนด้วยเลขที่หรือชั้นอื่นไปแล้ว','error');
           }
-          const u = { name: fName.trim(), studentNo: fNumber.trim(), grade: fGrade, role: 'student' };
+          const u = { name: nameKey, studentNo: numKey, grade: gradeKey, role: 'student' };
           localStorage.setItem(LS_KEY, JSON.stringify(u)); setUser(u); setActiveTab('home'); showToast(`ยินดีต้อนรับ ${u.name}`);
        } else {
-          await userRef.set({ name: fName.trim(), studentNo: fNumber.trim(), grade: fGrade, role: 'student', createdAt: Date.now() });
-          const u = { name: fName.trim(), studentNo: fNumber.trim(), grade: fGrade, role: 'student' };
+          // ตรวจสอบว่ามีคนใช้เลขที่นี้ในห้องนี้ไปแล้วหรือยัง (ป้องกันเลขที่ซ้ำ)
+          const duplicateCheck = await db.collection(USERS_PATH)
+             .where('grade', '==', gradeKey)
+             .where('studentNo', '==', numKey)
+             .get();
+             
+          if(!duplicateCheck.empty) {
+             setBusy(false);
+             return showToast(`เลขที่ ${numKey} ชั้น ${shortGrade(gradeKey)} มีคนใช้แล้ว`, 'error');
+          }
+
+          // สมัครสมาชิกใหม่
+          await userRef.set({ name: nameKey, studentNo: numKey, grade: gradeKey, role: 'student', createdAt: Date.now() });
+          const u = { name: nameKey, studentNo: numKey, grade: gradeKey, role: 'student' };
           localStorage.setItem(LS_KEY, JSON.stringify(u)); setUser(u); setActiveTab('home'); showToast('สมัครบัญชีสำเร็จ!');
        }
     } catch(err) {
@@ -449,7 +464,6 @@ function App(){
     if(!selectedAct||!user) return;
     const a=selectedAct;
     
-    // Cooldown 2 ชม.
     const lastT = myTasks[0];
     if(lastT && lastT.createdAt) {
       const hrs = (Date.now() - lastT.createdAt) / 3600000;
@@ -784,7 +798,7 @@ function App(){
                       <span className={`w-9 h-9 rounded-xl ${medal} ${i<3?'text-white':'text-ink-700'} flex items-center justify-center font-bold text-sm flex-shrink-0`}>{i<3?<i className="fas fa-crown text-xs"></i>:i+1}</span>
                       <div className="flex-1 min-w-0">
                         <p className="font-semibold text-ink-900 text-sm truncate">{r.name}{me && <span className="text-[10px] text-brand-600 font-bold ml-1.5">คุณ</span>}</p>
-                        <p className="text-[11px] text-ink-400">{shortGrade(r.grade)} เลชที่ {r.studentNo}</p>
+                        <p className="text-[11px] text-ink-400">{shortGrade(r.grade)} เลขที่ {r.studentNo}</p>
                       </div>
                       <div className="text-right flex-shrink-0">
                         <span className="font-bold text-brand-600 num">{r.points}</span>
@@ -808,7 +822,7 @@ function App(){
           </div>
         )}
 
-        {/* ================= TEACHER SCORES (หน้าดูคะแนน) ================= */}
+        {/* ================= TEACHER SCORES ================= */}
         {!isStudent && activeTab==='scores' && (
            <div className="fade-up space-y-3">
              <div className="bg-white rounded-3xl shadow-card p-4">
