@@ -190,8 +190,11 @@ function App(){
   const [movingTime,setMovingTime]=useState(0);
   const [gpsAcc,setGpsAcc]=useState(null);
   const [gpsState,setGpsState]=useState('idle');
-  const [imgBefore,setImgBefore]=useState(null); const [imgAfter,setImgAfter]=useState(null);
-  const [timeBefore,setTimeBefore]=useState(null); const [timeAfter,setTimeAfter]=useState(null);
+  
+  const [imgBefore,setImgBefore]=useState(null); 
+  const [imgAfter,setImgAfter]=useState(null);
+  const [timeBefore,setTimeBefore]=useState(null); 
+  const [timeAfter,setTimeAfter]=useState(null);
   const [busy,setBusy]=useState(false);
 
   const [tasks,setTasks]=useState([]);
@@ -243,6 +246,25 @@ function App(){
   useEffect(()=>{
     if(activeTab==='activity'&&!selectedAct) setActiveTab('home');
     if(activeTab==='review'&&user?.role!=='teacher') setActiveTab('home');
+    
+    // โหลด Draft รูประหว่างเปิดเข้ากิจกรรมนั้นๆ (หมดอายุ 5 ชั่วโมง)
+    if (activeTab === 'activity' && selectedAct && selectedAct.type !== 'gps') {
+      const draftStr = localStorage.getItem('hp_draft_' + selectedAct.id);
+      let loaded = false;
+      if (draftStr) {
+        try {
+          const draft = JSON.parse(draftStr);
+          if (Date.now() - draft.time < 5 * 3600 * 1000) {
+            setImgBefore(draft.b64); setTimeBefore(draft.time);
+            loaded = true;
+          } else {
+            localStorage.removeItem('hp_draft_' + selectedAct.id); // เกิน 5 ชม. ลบทิ้ง
+          }
+        } catch(e){}
+      }
+      if(!loaded){ setImgBefore(null); setTimeBefore(null); }
+      setImgAfter(null); setTimeAfter(null); // เคลียร์รูปหลังทุกครั้งที่เปิดเข้าหน้านี้
+    }
   },[activeTab,selectedAct,user]);
 
   const navigate=useCallback((tab,act=null)=>{
@@ -315,13 +337,26 @@ function App(){
     setBusy(true);
     try{
       const b64=await compressImage(f);
-      if(slot===1){ setImgBefore(b64); setTimeBefore(Date.now()); showToast('บันทึกรูปก่อนเริ่มแล้ว'); }
-      else { setImgAfter(b64); setTimeAfter(Date.now()); showToast('บันทึกรูปหลังเสร็จแล้ว'); }
+      const now = Date.now();
+      if(slot===1){ 
+        setImgBefore(b64); setTimeBefore(now); 
+        if (selectedAct) localStorage.setItem('hp_draft_' + selectedAct.id, JSON.stringify({b64, time: now}));
+        showToast('บันทึกรูปก่อนเริ่มแล้ว'); 
+      }
+      else { 
+        setImgAfter(b64); setTimeAfter(now); 
+        showToast('บันทึกรูปหลังเสร็จแล้ว'); 
+      }
     }catch(err){ showToast(err.message,'error'); }
     finally{ setBusy(false); e.target.value=''; }
   };
+  
+  const deleteBeforePhoto = useCallback(() => {
+    if(!window.confirm('ต้องการลบรูปก่อนเริ่มใช่หรือไม่?')) return;
+    setImgBefore(null); setTimeBefore(null);
+    if (selectedAct) localStorage.removeItem('hp_draft_' + selectedAct.id);
+  }, [selectedAct]);
 
-  /* ---- LOGIC คำนวณคะแนนใหม่ 30 HP ---- */
   const myTasks=useMemo(()=>tasks.filter(t=>t.studentName===user?.name).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)),[tasks,user]);
   
   const submitTask=async()=>{
@@ -343,7 +378,7 @@ function App(){
       const mins = elapsedTime / 60;
       const pace = dist > 0 ? mins / dist : 0;
       let met = 2.0;
-      if (pace < 3) met = 0; // Spoof หรือนั่งรถ
+      if (pace < 3) met = 0; 
       else if (pace <= 4.8) met = 11.5;
       else if (pace <= 5.45) met = 11.0;
       else if (pace <= 6.31) met = 9.8;
@@ -355,11 +390,11 @@ function App(){
     }else{
       if(!imgBefore||!imgAfter) return showToast('ต้องมีรูปครบทั้ง 2 ใบ','error');
       if(timeDiffMinutes<a.minMin) return showToast(`เวลายังไม่ถึง ${a.minMin} นาที`,'error');
-      const effectiveMins = Math.min(60, timeDiffMinutes); // เพดานเวลาสูงสุด 60 นาทีต่อครั้ง
+      const effectiveMins = Math.min(60, timeDiffMinutes); 
       hp = (a.met * effectiveMins) / 10;
     }
 
-    hp = Math.min(30, Math.round(hp)); // เพดานต่อครั้ง 30 HP และปัดเศษเป็นจำนวนเต็ม
+    hp = Math.min(30, Math.round(hp)); 
     if(hp <= 0) return showToast('กิจกรรมนี้ไม่ผ่านเกณฑ์การคำนวณ HP (เช่น วิ่งเร็วกว่า 3 นาที/กม.)','error');
 
     setBusy(true);
@@ -371,7 +406,9 @@ function App(){
         imgBefore:imgBefore||null, imgAfter:imgAfter||null, timeBefore:timeBefore||null, timeAfter:timeAfter||null,
         createdAt:Date.now(), serverAt:firebase.firestore.FieldValue.serverTimestamp(),
       });
-      showToast('ส่งให้ครูตรวจเรียบร้อย!'); resetActivity();
+      showToast('ส่งให้ครูตรวจเรียบร้อย!'); 
+      if (selectedAct) localStorage.removeItem('hp_draft_' + selectedAct.id); // ลบ Draft ทิ้งเมื่อส่งสำเร็จ
+      resetActivity();
     }catch(err){ showToast('บันทึกไม่สำเร็จ','error'); }
     finally{ setBusy(false); }
   };
@@ -383,7 +420,6 @@ function App(){
     }catch(err){ showToast('อัปเดตไม่สำเร็จ','error'); }
   };
 
-  // 2. ENGINE การคำนวณสถิติ
   const myTasksApproved = useMemo(()=>myTasks.filter(t=>t.status==='approved'),[myTasks]);
   const stats = useMemo(()=>{
     const hpByDay = {}; const hpByType = {};
@@ -400,15 +436,15 @@ function App(){
     let totalAcc = 0, totalGrading = 0, activeWeeks = 0;
     
     Object.entries(hpByDay).forEach(([dStr, hps])=>{
-       const cappedDay = Math.min(30, hps.reduce((a,b)=>a+b,0)); // เพดานวัน 30 HP
+       const cappedDay = Math.min(30, hps.reduce((a,b)=>a+b,0)); 
        const wKey = getStartOfWeek(dStr).toLocaleDateString('en-CA');
        if(!hpByWeek[wKey]) hpByWeek[wKey] = 0;
        hpByWeek[wKey] += cappedDay;
     });
     
     Object.values(hpByWeek).forEach(wHP => {
-       totalAcc += Math.min(180, wHP); // HP สะสมสัปดาห์ละ 180
-       const gHP = Math.min(90, wHP);  // HP คะแนนสัปดาห์ละ 90
+       totalAcc += Math.min(180, wHP); 
+       const gHP = Math.min(90, wHP);  
        totalGrading += gHP;
        if(gHP >= 20) activeWeeks++;
     });
@@ -427,10 +463,10 @@ function App(){
   const todayHP = Math.min(30, (stats.hpByDay[todayStr]||[]).reduce((a,b)=>a+b,0));
   const currWKey = getStartOfWeek().toLocaleDateString('en-CA');
   const currWeekGradingHP = Math.min(90, stats.hpByWeek[currWKey]||0);
+  const currWeekAccHP = Math.min(180, stats.hpByWeek[currWKey]||0); // สำหรับบาร์ 180 แต้ม
 
   const pendingAll=useMemo(()=>tasks.filter(t=>t.status==='pending').sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)),[tasks]);
   
-  // LEADERBOARD ใหม่ที่คำนวณผ่านเพดาน 180 HP
   const leaderboard=useMemo(()=>{
     const m={};
     tasks.filter(t=>t.status==='approved').forEach(t=>{
@@ -527,16 +563,16 @@ function App(){
                 <div className="flex items-center gap-3">
                   <span className="w-16 text-xs text-ink-500 font-medium">คะแนน</span>
                   <div className="flex-1 h-3 bg-paper rounded-full overflow-hidden">
-                    <div className="h-full bg-brand-500 rounded-full" style={{width: `${(currWeekGradingHP/30)*100/3}%`}}></div>
+                    <div className="h-full bg-brand-500 rounded-full" style={{width: `${(currWeekGradingHP/90)*100}%`}}></div>
                   </div>
-                  <span className="text-xs font-bold w-12 text-right">{(currWeekGradingHP/30).toFixed(1)} <span className="text-ink-400 font-normal">/ 3</span></span>
+                  <span className="text-xs font-bold w-12 text-right">{(currWeekGradingHP/30).toFixed(1)} <span className="text-ink-400 font-normal">/ 3.0</span></span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="w-16 text-xs text-ink-500 font-medium">HP (เกรด)</span>
+                  <span className="w-16 text-xs text-ink-500 font-medium">HP (แต้ม)</span>
                   <div className="flex-1 h-3 bg-paper rounded-full overflow-hidden">
-                    <div className="h-full bg-sky-500 rounded-full" style={{width: `${(currWeekGradingHP/90)*100}%`}}></div>
+                    <div className="h-full bg-sky-500 rounded-full" style={{width: `${(currWeekAccHP/180)*100}%`}}></div>
                   </div>
-                  <span className="text-xs font-bold w-12 text-right">{currWeekGradingHP} <span className="text-ink-400 font-normal">/ 90</span></span>
+                  <span className="text-xs font-bold w-12 text-right">{currWeekAccHP} <span className="text-ink-400 font-normal">/ 180</span></span>
                 </div>
                 <div className="flex items-center gap-3">
                   <span className="w-16 text-xs text-ink-500 font-medium">HP วันนี้</span>
@@ -564,7 +600,7 @@ function App(){
 
             <div className="bg-white rounded-3xl shadow-card p-5 relative overflow-hidden">
               <div className="absolute top-0 right-0 bg-brand-50 px-4 py-2.5 rounded-bl-2xl">
-                <span className="text-xs text-brand-700 font-bold">เกรดตอนนี้ {stats.totalScore} / 10</span>
+                <span className="text-xs text-brand-700 font-bold">คะแนนตอนนี้ {stats.totalScore} / 10</span>
               </div>
               <h2 className="text-[14px] font-bold text-ink-900 mb-4">โครงสร้างคะแนนรวม</h2>
               
@@ -646,7 +682,7 @@ function App(){
             ) : (
               <div className="bg-white rounded-3xl shadow-card p-5">
                 <div className="grid grid-cols-2 gap-3">
-                  <PhotoSlot label="ก่อนเริ่ม" step="1" img={imgBefore} time={timeBefore} onPick={e=>handleUpload(e,1)} onView={setPreview} disabled={busy}/>
+                  <PhotoSlot label="ก่อนเริ่ม" step="1" img={imgBefore} time={timeBefore} onPick={e=>handleUpload(e,1)} onView={setPreview} onDelete={deleteBeforePhoto} disabled={busy}/>
                   <PhotoSlot label="หลังเสร็จ" step="2" img={imgAfter} time={timeAfter} onPick={e=>handleUpload(e,2)} onView={setPreview} disabled={busy||!imgBefore} hint={!imgBefore?'ถ่ายรูปแรกก่อน':null}/>
                 </div>
                 <div className="mt-4">
@@ -838,7 +874,7 @@ const SkeletonList=()=><div className="space-y-2 mt-3">{[0,1,2].map(i=><div key=
 const EmptyInline=({text})=><div className="py-12 text-center"><i className="fas fa-inbox text-3xl text-ink-400/40"></i><p className="text-sm text-ink-400 mt-2">{text}</p></div>;
 const EmptyCard=({icon,text,tone='text-ink-400/40'})=><div className="bg-white rounded-3xl shadow-card p-12 text-center fade-up"><i className={`fas ${icon} text-5xl ${tone}`}></i><p className="text-ink-500 mt-3 font-medium">{text}</p></div>;
 
-function PhotoSlot({label,step,img,time,onPick,onView,disabled,hint}){
+function PhotoSlot({label,step,img,time,onPick,onView,onDelete,disabled,hint}){
   const id='f_'+step;
   return (
     <div>
@@ -846,9 +882,16 @@ function PhotoSlot({label,step,img,time,onPick,onView,disabled,hint}){
         <span className={`w-4 h-4 rounded-full text-[9px] flex items-center justify-center text-white ${img?'bg-brand-500':'bg-ink-400/50'}`}>{img?<i className="fas fa-check text-[7px]"></i>:step}</span>{label}
       </p>
       {img ? (
-        <div onClick={()=>onView(img)} className="relative press cursor-pointer">
-          <img src={img} className="w-full h-36 object-cover rounded-2xl" alt={label}/>
-          <span className="absolute bottom-2 left-2 bg-black/65 text-white text-[9px] px-2 py-1 rounded-lg backdrop-blur-sm"><i className="fas fa-clock mr-1"></i>{fmtDT(time)}</span>
+        <div className="relative group">
+          <div onClick={()=>onView(img)} className="relative press cursor-pointer">
+            <img src={img} className="w-full h-36 object-cover rounded-2xl" alt={label}/>
+            <span className="absolute bottom-2 left-2 bg-black/65 text-white text-[9px] px-2 py-1 rounded-lg backdrop-blur-sm"><i className="fas fa-clock mr-1"></i>{fmtDT(time)}</span>
+          </div>
+          {onDelete && !disabled && (
+            <button onClick={(e)=>{ e.stopPropagation(); onDelete(); }} className="absolute -top-2 -right-2 w-7 h-7 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-md press">
+              <i className="fas fa-trash-alt text-[10px]"></i>
+            </button>
+          )}
         </div>
       ) : (
         <label htmlFor={id} className={`h-36 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-1.5 transition ${disabled?'border-slate-200 bg-paper text-ink-400/50':'border-brand-300 bg-brand-50/50 text-brand-600 cursor-pointer active:scale-95'}`}>
