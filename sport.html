@@ -82,7 +82,6 @@ const { useState, useEffect, useRef, useMemo, useCallback } = React;
 /* ============================================================
    1) CONFIG
 ============================================================ */
-// 👇 วาง config ของคุณตรงนี้
 const firebaseConfig = {
   apiKey: "AIza...........",
   authDomain: "health-passport-school.firebaseapp.com",
@@ -92,10 +91,9 @@ const firebaseConfig = {
   appId: "1:000000000000:web:xxxxxxxxxxxx"
 };
 
-const TASKS_PATH = 'artifacts/health-passport-final/public/data/tasks';
+const TASKS_PATH = 'artifacts/health-passport-v4/public/data/tasks';
 const TEACHER_PASSWORD = '191919';
-const LS_KEY = 'hp_user_v2';
-const WEEKLY_GOAL = 50;               // เป้าคะแนนต่อสัปดาห์
+const LS_KEY = 'hp_user_v4';
 
 const GPS = {
   maxAccuracy: 25, warmupFixes: 3, minMove: 8,
@@ -109,16 +107,16 @@ catch(e){ initError = e.message; }
 const ACTIVITIES = [
   { id:'running', name:'วิ่งสะสมระยะ', short:'วิ่ง', icon:'fa-person-running',
     tint:'bg-sky-50', ic:'bg-sky-500', text:'text-sky-600', ring:'#0ea5e9',
-    points:10, type:'gps', minKm:0.5, desc:'จับระยะด้วย GPS อย่างน้อย 0.5 กม.' },
+    type:'gps', minKm:0.5, desc:'ระบบคำนวณ HP จากความเร็วจริง (Pace)' },
   { id:'sport_family', name:'Sport Family', short:'ครอบครัว', icon:'fa-people-roof',
     tint:'bg-brand-50', ic:'bg-brand-500', text:'text-brand-600', ring:'#10b981',
-    points:15, type:'photo', minMin:30, desc:'ออกกำลังกายกับครอบครัว 30 นาที' },
+    type:'photo', minMin:10, desc:'ออกกำลังกายกับครอบครัว', rate: 0.65 },
   { id:'sport', name:'เล่นกีฬา', short:'กีฬา', icon:'fa-basketball',
     tint:'bg-amber-50', ic:'bg-amber-500', text:'text-amber-600', ring:'#f59e0b',
-    points:12, type:'photo', minMin:30, desc:'เล่นกีฬาที่ชอบ 30 นาที' },
+    type:'photo', minMin:10, desc:'เล่นกีฬาที่ชอบ', rate: 0.45 },
   { id:'dancing', name:'Dancing', short:'เต้น', icon:'fa-music',
     tint:'bg-rose-50', ic:'bg-rose-500', text:'text-rose-600', ring:'#f43f5e',
-    points:12, type:'photo', minMin:20, desc:'เต้นออกกำลังกาย 20 นาที' },
+    type:'photo', minMin:10, desc:'เต้นออกกำลังกาย', rate: 0.45 },
 ];
 const actById = id => ACTIVITIES.find(a => a.id === id);
 
@@ -135,7 +133,7 @@ const fmtTime = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60)
 const fmtDT = ts => ts ? new Date(ts).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '-';
 const greet = () => { const h=new Date().getHours(); return h<12?'สวัสดีตอนเช้า':h<17?'สวัสดีตอนบ่าย':'สวัสดีตอนเย็น'; };
 const initial = n => (n||'?').trim().charAt(0);
-const startOfWeek = () => { const d=new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d.getTime(); };
+const getStartOfWeek = (dStr) => { const d = dStr ? new Date(dStr) : new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d; };
 
 function compressImage(file, maxSize=560, quality=.72){
   return new Promise((res,rej)=>{
@@ -165,15 +163,9 @@ class ErrorBoundary extends React.Component{
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="bg-white rounded-3xl shadow-lift p-8 max-w-sm w-full text-center">
-          <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-50 flex items-center justify-center">
-            <i className="fas fa-triangle-exclamation text-3xl text-amber-500"></i>
-          </div>
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-50 flex items-center justify-center"><i className="fas fa-triangle-exclamation text-3xl text-amber-500"></i></div>
           <h2 className="text-lg font-bold text-ink-900 mt-4">เกิดข้อผิดพลาด</h2>
-          <p className="text-xs text-ink-400 mt-2 break-words">{String(this.state.err?.message||this.state.err)}</p>
-          <button onClick={()=>this.setState({err:null})}
-            className="mt-6 w-full bg-brand-600 text-white h-13 py-3.5 rounded-2xl font-semibold press">
-            <i className="fas fa-rotate-right mr-2"></i>กลับหน้าหลัก
-          </button>
+          <button onClick={()=>this.setState({err:null})} className="mt-6 w-full bg-brand-600 text-white h-13 py-3.5 rounded-2xl font-semibold press">กลับหน้าหลัก</button>
         </div>
       </div>
     );
@@ -198,8 +190,11 @@ function App(){
   const [movingTime,setMovingTime]=useState(0);
   const [gpsAcc,setGpsAcc]=useState(null);
   const [gpsState,setGpsState]=useState('idle');
-  const [imgBefore,setImgBefore]=useState(null); const [imgAfter,setImgAfter]=useState(null);
-  const [timeBefore,setTimeBefore]=useState(null); const [timeAfter,setTimeAfter]=useState(null);
+  
+  const [imgBefore,setImgBefore]=useState(null); 
+  const [imgAfter,setImgAfter]=useState(null);
+  const [timeBefore,setTimeBefore]=useState(null); 
+  const [timeAfter,setTimeAfter]=useState(null);
   const [busy,setBusy]=useState(false);
 
   const [tasks,setTasks]=useState([]);
@@ -217,16 +212,13 @@ function App(){
 
   const timeDiffMinutes=useMemo(()=> (timeBefore&&timeAfter)?Math.max(0,Math.round((timeAfter-timeBefore)/60000)):0,[timeBefore,timeAfter]);
 
-  /* ---- boot ---- */
   useEffect(()=>{
     if(initError){ setBooting(false); return; }
     const s=localStorage.getItem(LS_KEY);
     if(s){ try{ setUser(JSON.parse(s)); }catch(e){ localStorage.removeItem(LS_KEY); } }
-    auth.signInAnonymously().catch(e=>console.warn(e.message))
-      .finally(()=>setTimeout(()=>setBooting(false),700));
+    auth.signInAnonymously().catch(e=>console.warn(e.message)).finally(()=>setTimeout(()=>setBooting(false),700));
   },[]);
 
-  /* ---- firestore ---- */
   useEffect(()=>{
     if(!user||!db) return;
     setLoadingData(true);
@@ -254,61 +246,70 @@ function App(){
   useEffect(()=>{
     if(activeTab==='activity'&&!selectedAct) setActiveTab('home');
     if(activeTab==='review'&&user?.role!=='teacher') setActiveTab('home');
+    
+    // โหลด Draft รูประหว่างเปิดเข้ากิจกรรมนั้นๆ
+    if (activeTab === 'activity' && selectedAct && selectedAct.type !== 'gps' && user) {
+      const draftKey = `hp_draft_${user.name}_${selectedAct.id}`;
+      const draftStr = localStorage.getItem(draftKey);
+      let loaded = false;
+      if (draftStr) {
+        try {
+          const draft = JSON.parse(draftStr);
+          if (Date.now() - draft.time < 5 * 3600 * 1000) {
+            setImgBefore(draft.b64); setTimeBefore(draft.time);
+            loaded = true;
+          } else {
+            localStorage.removeItem(draftKey); 
+          }
+        } catch(e){}
+      }
+      if(!loaded){ setImgBefore(null); setTimeBefore(null); }
+      setImgAfter(null); setTimeAfter(null); 
+    }
   },[activeTab,selectedAct,user]);
 
   const navigate=useCallback((tab,act=null)=>{
-    setActiveTab(tab); setSelectedAct(act);
-    window.history.pushState({hp:true,tab},'');
+    setActiveTab(tab); setSelectedAct(act); window.history.pushState({hp:true,tab},'');
   },[]);
 
   const backRef=useRef(()=>{});
   backRef.current=()=>{
     if(preview){ setPreview(null); window.history.pushState({hp:true},''); return; }
-    if(isTracking && !window.confirm('กำลังจับเวลาอยู่ ออกจากหน้านี้ข้อมูลจะไม่ถูกบันทึก ยืนยันหรือไม่?')){
-      window.history.pushState({hp:true,tab:activeTab},''); return;
-    }
+    if(isTracking && !window.confirm('กำลังจับเวลาอยู่ ยืนยันที่จะออกหรือไม่?')){ window.history.pushState({hp:true,tab:activeTab},''); return; }
     if(activeTab==='activity') resetActivity();
     else if(activeTab!=='home') setActiveTab(user?.role==='teacher'?'review':'home');
     else window.history.pushState({hp:true,tab:'home'},'');
   };
   useEffect(()=>{
     if(!user) return;
-    window.history.replaceState({hp:true,tab:'home'},'');
-    window.history.pushState({hp:true,tab:'home'},'');
-    const onPop=()=>backRef.current();
-    window.addEventListener('popstate',onPop);
+    window.history.replaceState({hp:true,tab:'home'},''); window.history.pushState({hp:true,tab:'home'},'');
+    const onPop=()=>backRef.current(); window.addEventListener('popstate',onPop);
     return ()=>window.removeEventListener('popstate',onPop);
   },[user]);
 
-  /* ---- auth ---- */
   const handleLogin=e=>{
     e.preventDefault();
     if(loginMode==='teacher'){
       if(fPass!==TEACHER_PASSWORD) return showToast('รหัสผ่านไม่ถูกต้อง','error');
       const u={name:'คุณครู',room:'-',role:'teacher'};
-      localStorage.setItem(LS_KEY,JSON.stringify(u)); setUser(u); setActiveTab('review');
-      return showToast('ยินดีต้อนรับคุณครู');
+      localStorage.setItem(LS_KEY,JSON.stringify(u)); setUser(u); setActiveTab('review'); return showToast('ยินดีต้อนรับคุณครู');
     }
     if(!fName.trim()) return showToast('กรุณากรอกชื่อ-นามสกุล','error');
     const u={name:fName.trim(),room:fRoom.trim()||'-',role:'student'};
-    localStorage.setItem(LS_KEY,JSON.stringify(u)); setUser(u); setActiveTab('home');
-    showToast(`ยินดีต้อนรับ ${u.name}`);
+    localStorage.setItem(LS_KEY,JSON.stringify(u)); setUser(u); setActiveTab('home'); showToast(`ยินดีต้อนรับ ${u.name}`);
   };
   const handleLogout=()=>{
     if(!window.confirm('ต้องการออกจากระบบใช่หรือไม่?')) return;
-    stopWatchers(); localStorage.removeItem(LS_KEY);
-    setUser(null); setTasks([]); setActiveTab('home'); setSelectedAct(null);
+    resetActivity(); 
+    localStorage.removeItem(LS_KEY); setUser(null); setTasks([]); setActiveTab('home'); setSelectedAct(null);
   };
 
-  /* ---- GPS anti-drift ---- */
   const onPosition=useCallback(pos=>{
-    const {latitude:lat,longitude:lng,accuracy:acc,speed:devSpeed}=pos.coords;
-    const t=pos.timestamp||Date.now();
+    const {latitude:lat,longitude:lng,accuracy:acc,speed:devSpeed}=pos.coords; const t=pos.timestamp||Date.now();
     setGpsAcc(Math.round(acc));
     if(warmup.current<GPS.warmupFixes){ warmup.current++; lastPos.current={lat,lng,t,acc}; setGpsState('warmup'); return; }
     if(acc>GPS.maxAccuracy){ setGpsState('weak'); streak.current=0; return; }
-    const prev=lastPos.current;
-    if(!prev){ lastPos.current={lat,lng,t,acc}; return; }
+    const prev=lastPos.current; if(!prev){ lastPos.current={lat,lng,t,acc}; return; }
     const dt=(t-prev.t)/1000; if(dt<1) return;
     const d=getDistanceM(prev.lat,prev.lng,lat,lng);
     const floor=Math.max(GPS.minMove,((acc+prev.acc)/2)*GPS.noiseFactor);
@@ -326,57 +327,88 @@ function App(){
   const startRunning=()=>{
     if(!navigator.geolocation) return showToast('อุปกรณ์ไม่รองรับ GPS','error');
     setDistance(0); setElapsedTime(0); setMovingTime(0); setGpsState('warmup');
-    lastPos.current=null; warmup.current=0; streak.current=0; pending.current=0; movingAt.current=0;
-    setIsTracking(true);
-    timerRef.current=setInterval(()=>{
-      setElapsedTime(t=>t+1);
-      if(Date.now()-movingAt.current<6000) setMovingTime(t=>t+1);
-    },1000);
-    watchRef.current=navigator.geolocation.watchPosition(onPosition,
-      err=>showToast('GPS: '+err.message,'error'),
-      {enableHighAccuracy:true,maximumAge:0,timeout:20000});
+    lastPos.current=null; warmup.current=0; streak.current=0; pending.current=0; movingAt.current=0; setIsTracking(true);
+    timerRef.current=setInterval(()=>{ setElapsedTime(t=>t+1); if(Date.now()-movingAt.current<6000) setMovingTime(t=>t+1); },1000);
+    watchRef.current=navigator.geolocation.watchPosition(onPosition,err=>showToast('GPS: '+err.message,'error'),{enableHighAccuracy:true,maximumAge:0,timeout:20000});
     showToast('กำลังจับสัญญาณ GPS...');
   };
   const stopRunning=()=>{ stopWatchers(); setIsTracking(false); setGpsState('idle'); };
 
-  /* ---- upload ---- */
   const handleUpload=async(e,slot)=>{
     const f=e.target.files?.[0]; if(!f) return;
     setBusy(true);
     try{
       const b64=await compressImage(f);
-      if(slot===1){ setImgBefore(b64); setTimeBefore(Date.now()); showToast('บันทึกรูปก่อนเริ่มแล้ว'); }
-      else { setImgAfter(b64); setTimeAfter(Date.now()); showToast('บันทึกรูปหลังเสร็จแล้ว'); }
+      const now = Date.now();
+      if(slot===1){ 
+        setImgBefore(b64); setTimeBefore(now); 
+        if (selectedAct && user) localStorage.setItem(`hp_draft_${user.name}_${selectedAct.id}`, JSON.stringify({b64, time: now}));
+        showToast('บันทึกรูปก่อนเริ่มแล้ว'); 
+      }
+      else { 
+        setImgAfter(b64); setTimeAfter(now); 
+        showToast('บันทึกรูปหลังเสร็จแล้ว'); 
+      }
     }catch(err){ showToast(err.message,'error'); }
     finally{ setBusy(false); e.target.value=''; }
   };
+  
+  const deleteBeforePhoto = useCallback(() => {
+    if(!window.confirm('ต้องการลบรูปก่อนเริ่มใช่หรือไม่?')) return;
+    setImgBefore(null); setTimeBefore(null);
+    if (selectedAct && user) localStorage.removeItem(`hp_draft_${user.name}_${selectedAct.id}`);
+  }, [selectedAct, user]);
 
-  /* ---- submit ---- */
+  const myTasks=useMemo(()=>tasks.filter(t=>t.studentName===user?.name).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)),[tasks,user]);
+  
   const submitTask=async()=>{
     if(!selectedAct||!user) return;
     const a=selectedAct;
+    
+    // 1. ตรวจสอบเงื่อนไข Cooldown 2 ชม.
+    const lastT = myTasks[0];
+    if(lastT && lastT.createdAt) {
+      const hrs = (Date.now() - lastT.createdAt) / 3600000;
+      if(hrs < 2) return showToast(`ต้องเว้นระยะ 2 ชั่วโมง (รออีก ${Math.ceil((2-hrs)*60)} นาที)`,'error');
+    }
+
+    let hp = 0;
     if(a.type==='gps'){
       if(isTracking) return showToast('กรุณากดหยุดจับเวลาก่อนส่ง','error');
       if(distance<a.minKm) return showToast(`ระยะยังไม่ถึง ${a.minKm} กม.`,'error');
+      const dist = Number(distance.toFixed(2));
+      const mins = elapsedTime / 60;
+      const pace = dist > 0 ? mins / dist : 0;
+      let runRate = 0.25; 
+      if (pace < 3) runRate = 0; 
+      else if (pace <= 4.8) runRate = 0.75;  // วิ่งเร็ว
+      else if (pace <= 6.32) runRate = 0.65; // วิ่งดี
+      else if (pace <= 7.5) runRate = 0.55;  // วิ่งเหยาะ
+      else if (pace <= 10.92) runRate = 0.40; // เดินเร็ว
+      hp = runRate * mins;
     }else{
       if(!imgBefore||!imgAfter) return showToast('ต้องมีรูปครบทั้ง 2 ใบ','error');
-      if(timeDiffMinutes<a.minMin) return showToast(`เวลายังไม่ถึง ${a.minMin} นาที (ตอนนี้ ${timeDiffMinutes} นาที)`,'error');
+      if(timeDiffMinutes<a.minMin) return showToast(`เวลายังไม่ถึง ${a.minMin} นาที`,'error');
+      const effectiveMins = Math.min(240, timeDiffMinutes); // เพดานเวลาถ่ายรูป 4 ชม. ต่อครั้ง
+      hp = a.rate * effectiveMins;
     }
+
+    hp = Math.min(100, Math.round(hp)); // เพดาน 100 HP ต่อการส่ง 1 ครั้ง (และไม่เกิน 100 ต่อวันในระบบรวม)
+    if(hp <= 0) return showToast('กิจกรรมนี้ไม่ผ่านเกณฑ์การคำนวณ HP (เช่น วิ่งเร็วกว่า 3 นาที/กม.)','error');
+
     setBusy(true);
     try{
       await db.collection(TASKS_PATH).add({
-        studentName:user.name, room:user.room,
-        activityId:a.id, activityName:a.name, points:a.points, status:'pending',
-        distance:a.type==='gps'?Number(distance.toFixed(2)):null,
-        duration:a.type==='gps'?elapsedTime:timeDiffMinutes*60,
-        movingTime:a.type==='gps'?movingTime:null,
-        avgPace:a.type==='gps'&&distance>0?Number((elapsedTime/60/distance).toFixed(2)):null,
-        imgBefore:imgBefore||null, imgAfter:imgAfter||null,
-        timeBefore:timeBefore||null, timeAfter:timeAfter||null,
+        studentName:user.name, room:user.room, activityId:a.id, activityName:a.name, hp:hp, status:'pending',
+        distance:a.type==='gps'?Number(distance.toFixed(2)):null, duration:a.type==='gps'?elapsedTime:timeDiffMinutes*60,
+        movingTime:a.type==='gps'?movingTime:null, avgPace:a.type==='gps'&&distance>0?Number((elapsedTime/60/distance).toFixed(2)):null,
+        imgBefore:imgBefore||null, imgAfter:imgAfter||null, timeBefore:timeBefore||null, timeAfter:timeAfter||null,
         createdAt:Date.now(), serverAt:firebase.firestore.FieldValue.serverTimestamp(),
       });
-      showToast('ส่งให้ครูตรวจเรียบร้อย!'); resetActivity();
-    }catch(err){ console.error(err); showToast('บันทึกไม่สำเร็จ','error'); }
+      showToast('ส่งให้ครูตรวจเรียบร้อย!'); 
+      if (selectedAct && user) localStorage.removeItem(`hp_draft_${user.name}_${selectedAct.id}`); 
+      resetActivity();
+    }catch(err){ showToast('บันทึกไม่สำเร็จ','error'); }
     finally{ setBusy(false); }
   };
 
@@ -387,108 +419,105 @@ function App(){
     }catch(err){ showToast('อัปเดตไม่สำเร็จ','error'); }
   };
 
-  /* ---- derived ---- */
-  const myTasks=useMemo(()=>tasks.filter(t=>t.studentName===user?.name).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)),[tasks,user]);
-  const myPoints=useMemo(()=>myTasks.filter(t=>t.status==='approved').reduce((s,t)=>s+(t.points||0),0),[myTasks]);
-  const myPending=useMemo(()=>myTasks.filter(t=>t.status==='pending').length,[myTasks]);
-  const weekPoints=useMemo(()=>{ const w=startOfWeek();
-    return myTasks.filter(t=>t.status==='approved'&&(t.createdAt||0)>=w).reduce((s,t)=>s+(t.points||0),0); },[myTasks]);
+  const myTasksApproved = useMemo(()=>myTasks.filter(t=>t.status==='approved'),[myTasks]);
+  const stats = useMemo(()=>{
+    const hpByDay = {}; const hpByType = {};
+    myTasksApproved.forEach(t=>{
+       const dateStr = new Date(t.createdAt).toLocaleDateString('en-CA');
+       if(!hpByDay[dateStr]) hpByDay[dateStr] = [];
+       hpByDay[dateStr].push(t.hp||0);
+       
+       if(!hpByType[t.activityId]) hpByType[t.activityId] = 0;
+       hpByType[t.activityId] += (t.hp||0);
+    });
+    
+    const hpByWeek = {};
+    let totalAcc = 0, totalGrading = 0, activeWeeks = 0;
+    
+    Object.entries(hpByDay).forEach(([dStr, hps])=>{
+       const cappedDay = Math.min(100, hps.reduce((a,b)=>a+b,0)); // เพดานวัน 100 HP
+       const wKey = getStartOfWeek(dStr).toLocaleDateString('en-CA');
+       if(!hpByWeek[wKey]) hpByWeek[wKey] = 0;
+       hpByWeek[wKey] += cappedDay;
+    });
+    
+    Object.values(hpByWeek).forEach(wHP => {
+       totalAcc += wHP; // สะสมอันดับไม่จำกัดเพดาน
+       const gHP = Math.min(600, wHP); // เพดาน 600 HP (6 คะแนน) ต่อสัปดาห์
+       totalGrading += gHP;
+       if(gHP >= 100) activeWeeks++; // 1 สัปดาห์ต้องได้อย่างน้อย 100 HP จึงจะนับเป็น Active
+    });
+    
+    const variety = Object.values(hpByType).filter(h=>h>=100).length;
+    
+    const scoreA = Math.min(7, totalGrading / 100);
+    const scoreB = activeWeeks>=4 ? 2.0 : activeWeeks===3 ? 1.5 : activeWeeks===2 ? 1.0 : activeWeeks===1 ? 0.5 : 0;
+    const scoreC = variety>=4 ? 1.0 : variety===3 ? 0.7 : variety===2 ? 0.4 : 0;
+    const totalScore = (scoreA+scoreB+scoreC).toFixed(1);
+    
+    return { totalAcc, totalGrading, activeWeeks, variety, scoreA, scoreB, scoreC, totalScore, hpByWeek, hpByDay };
+  },[myTasksApproved]);
+
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const todayHP = Math.min(100, (stats.hpByDay[todayStr]||[]).reduce((a,b)=>a+b,0));
+  const currWKey = getStartOfWeek().toLocaleDateString('en-CA');
+  const currWeekGradingHP = Math.min(600, stats.hpByWeek[currWKey]||0); // เกรดจำกัดที่ 600/สัปดาห์
+  const currWeekAccHP = stats.hpByWeek[currWKey]||0; // แต้มสะสมไม่อั้น
+
   const pendingAll=useMemo(()=>tasks.filter(t=>t.status==='pending').sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)),[tasks]);
+  
   const leaderboard=useMemo(()=>{
     const m={};
     tasks.filter(t=>t.status==='approved').forEach(t=>{
       const k=t.studentName||'-';
-      if(!m[k]) m[k]={name:k,room:t.room||'-',points:0,count:0};
-      m[k].points+=t.points||0; m[k].count++;
+      if(!m[k]) m[k]={name:k,room:t.room||'-',hpByDay:{}};
+      const dateStr = new Date(t.createdAt).toLocaleDateString('en-CA');
+      if(!m[k].hpByDay[dateStr]) m[k].hpByDay[dateStr] = [];
+      m[k].hpByDay[dateStr].push(t.hp || 0);
     });
-    return Object.values(m).sort((a,b)=>b.points-a.points).slice(0,10);
+    const result = Object.values(m).map(u => {
+      let total = 0;
+      Object.entries(u.hpByDay).forEach(([dStr, hps]) => {
+          total += Math.min(100, hps.reduce((a,b)=>a+b,0)); // นับตามเพดาน 100/วัน
+      });
+      u.points = total;
+      return u;
+    }).sort((a,b)=>b.points-a.points).slice(0,10);
+    return result;
   },[tasks]);
   const myRank=useMemo(()=>leaderboard.findIndex(r=>r.name===user?.name)+1,[leaderboard,user]);
 
   const gpsInfo={
-    warmup:['text-amber-600','bg-amber-50','fa-satellite','กำลังจับสัญญาณ GPS'],
-    weak:['text-rose-600','bg-rose-50','fa-triangle-exclamation',`สัญญาณอ่อน (±${gpsAcc} ม.)`],
-    idle:['text-ink-400','bg-slate-50','fa-pause','อยู่นิ่ง — ยังไม่นับระยะ'],
-    moving:['text-brand-600','bg-brand-50','fa-person-running','กำลังเคลื่อนที่'],
+    warmup:['text-amber-600','bg-amber-50','fa-satellite','กำลังจับสัญญาณ GPS'], weak:['text-rose-600','bg-rose-50','fa-triangle-exclamation',`สัญญาณอ่อน (±${gpsAcc} ม.)`],
+    idle:['text-ink-400','bg-slate-50','fa-pause','อยู่นิ่ง — ยังไม่นับระยะ'], moving:['text-brand-600','bg-brand-50','fa-person-running','กำลังเคลื่อนที่'],
   }[gpsState]||['text-ink-400','bg-slate-50','fa-satellite-dish','-'];
 
-  /* ============================================================
-     RENDER
-  ============================================================ */
-  if(initError) return (
-    <div className="min-h-screen flex items-center justify-center p-6">
-      <div className="bg-white p-8 rounded-3xl shadow-card text-center max-w-sm">
-        <i className="fas fa-plug-circle-xmark text-4xl text-rose-500 mb-3"></i>
-        <p className="font-bold text-ink-900">เชื่อมต่อ Firebase ไม่สำเร็จ</p>
-        <p className="text-xs text-ink-400 mt-2">{initError}</p>
-      </div>
-    </div>
-  );
-
-  /* ---------- SPLASH (ล้อปกไลน์) ---------- */
-  if(booting) return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-brand-500 to-brand-600">
-      <div className="pop w-32 h-32 rounded-full bg-white/15 flex items-center justify-center">
-        <div className="w-24 h-24 rounded-full bg-white flex items-center justify-center shadow-lift">
-          <i className="fas fa-heart-pulse text-4xl text-brand-500"></i>
-        </div>
-      </div>
-      <h1 className="text-white text-2xl font-bold tracking-[.18em] mt-6">HEALTH</h1>
-      <p className="text-white/80 text-sm tracking-[.35em] font-medium">PASSPORT</p>
-      <div className="mt-8 w-28 h-1 rounded-full bg-white/25 overflow-hidden">
-        <div className="h-full w-1/2 bg-white/80 rounded-full shimmer"></div>
-      </div>
-    </div>
-  );
-
-  /* ---------- LOGIN ---------- */
+  if(initError) return <div className="min-h-screen flex items-center justify-center p-6">Error: {initError}</div>;
+  if(booting) return <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-brand-500 to-brand-600"><h1 className="text-white text-2xl font-bold tracking-widest mt-6">HEALTH PASSPORT</h1></div>;
   if(!user) return (
     <div className="min-h-screen bg-gradient-to-b from-brand-500 via-brand-500 to-brand-700 flex flex-col items-center justify-center p-6">
       <Toast toast={toast}/>
       <div className="w-full max-w-sm fade-up">
-        <div className="text-center mb-7">
-          <div className="w-20 h-20 mx-auto rounded-full bg-white flex items-center justify-center shadow-lift">
-            <i className="fas fa-heart-pulse text-3xl text-brand-500"></i>
-          </div>
-          <h1 className="text-white text-2xl font-bold mt-4 tracking-wide">Health Passport</h1>
-          <p className="text-white/75 text-sm mt-1">สมุดบันทึกสุขภาพนักเรียน</p>
-        </div>
-
+        <div className="text-center mb-7"><h1 className="text-white text-2xl font-bold tracking-wide">Health Passport</h1></div>
         <div className="bg-white rounded-[28px] shadow-lift p-6">
           <div className="grid grid-cols-2 gap-1 p-1 bg-paper rounded-2xl mb-5">
             {[['student','นักเรียน','fa-child-reaching'],['teacher','คุณครู','fa-chalkboard-user']].map(([m,l,ic])=>(
-              <button key={m} onClick={()=>setLoginMode(m)}
-                className={`py-3 rounded-xl text-sm font-semibold transition-all ${loginMode===m?'bg-white shadow-card text-brand-600':'text-ink-400'}`}>
-                <i className={`fas ${ic} mr-1.5`}></i>{l}
-              </button>
+              <button key={m} onClick={()=>setLoginMode(m)} className={`py-3 rounded-xl text-sm font-semibold ${loginMode===m?'bg-white shadow-card text-brand-600':'text-ink-400'}`}><i className={`fas ${ic} mr-1.5`}></i>{l}</button>
             ))}
           </div>
-
           <form onSubmit={handleLogin} className="space-y-3">
-            {loginMode==='student' ? (
-              <>
-                <Field icon="fa-user" value={fName} onChange={setFName} placeholder="ชื่อ - นามสกุล"/>
-                <Field icon="fa-school" value={fRoom} onChange={setFRoom} placeholder="ห้อง (เช่น ม.1/2)"/>
-              </>
-            ) : (
-              <Field icon="fa-lock" type="password" value={fPass} onChange={setFPass} placeholder="รหัสผ่านคุณครู"/>
-            )}
-            <button type="submit"
-              className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold text-base shadow-lift press mt-1">
-              เข้าสู่ระบบ<i className="fas fa-arrow-right ml-2 text-sm"></i>
-            </button>
+            {loginMode==='student' ? ( <><Field icon="fa-user" value={fName} onChange={setFName} placeholder="ชื่อ - นามสกุล"/><Field icon="fa-school" value={fRoom} onChange={setFRoom} placeholder="ห้อง (เช่น ม.1/2)"/></>
+            ) : ( <Field icon="fa-lock" type="password" value={fPass} onChange={setFPass} placeholder="รหัสผ่านคุณครู"/> )}
+            <button type="submit" className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold press mt-1">เข้าสู่ระบบ</button>
           </form>
         </div>
-        <p className="text-center text-white/60 text-[11px] mt-5">
-          <i className="fas fa-shield-heart mr-1"></i>ข้อมูลใช้เพื่อการเรียนการสอนเท่านั้น
-        </p>
       </div>
     </div>
   );
 
   const isStudent = user.role==='student';
+  const hpNeeded = 100 - (stats.totalGrading % 100); // สำหรับ 1 คะแนน (100 HP)
 
-  /* ---------- MAIN ---------- */
   return (
     <div className="min-h-screen pb-28">
       <Toast toast={toast}/>
@@ -499,15 +528,11 @@ function App(){
         </div>
       )}
 
-      {/* ===== HEADER ===== */}
       <header className="relative bg-gradient-to-br from-brand-500 to-brand-700 text-white rounded-b-[32px] shadow-lift">
         <div className="safe-t px-5 pt-5 pb-20">
           <div className="flex items-center gap-3">
             {activeTab!=='home' && activeTab!=='review' && (
-              <button onClick={()=>backRef.current()}
-                className="w-10 h-10 rounded-full glass flex items-center justify-center press flex-shrink-0">
-                <i className="fas fa-chevron-left text-sm"></i>
-              </button>
+              <button onClick={()=>backRef.current()} className="w-10 h-10 rounded-full glass flex items-center justify-center press flex-shrink-0"><i className="fas fa-chevron-left text-sm"></i></button>
             )}
             <div className="w-11 h-11 rounded-2xl bg-white/95 text-brand-600 flex items-center justify-center font-bold text-lg flex-shrink-0 shadow-card">
               {isStudent ? initial(user.name) : <i className="fas fa-chalkboard-user text-base"></i>}
@@ -516,13 +541,8 @@ function App(){
               <p className="text-[11px] text-white/70 leading-tight">{greet()}</p>
               <h1 className="text-[17px] font-bold truncate leading-tight">{user.name}</h1>
             </div>
-            <span className="text-[11px] glass px-2.5 py-1 rounded-full font-medium whitespace-nowrap">
-              {isStudent ? `ห้อง ${user.room}` : 'โหมดครู'}
-            </span>
-            <button onClick={handleLogout}
-              className="w-10 h-10 rounded-full glass flex items-center justify-center press flex-shrink-0">
-              <i className="fas fa-right-from-bracket text-sm"></i>
-            </button>
+            <span className="text-[11px] glass px-2.5 py-1 rounded-full font-medium whitespace-nowrap">{isStudent ? `ห้อง ${user.room}` : 'โหมดครู'}</span>
+            <button onClick={handleLogout} className="w-10 h-10 rounded-full glass flex items-center justify-center press flex-shrink-0"><i className="fas fa-right-from-bracket text-sm"></i></button>
           </div>
         </div>
       </header>
@@ -531,66 +551,93 @@ function App(){
 
         {/* ================= STUDENT HOME ================= */}
         {isStudent && activeTab==='home' && (
-          <div className="fade-up space-y-5">
-            {/* สรุปคะแนน */}
-            <div className="bg-white rounded-3xl shadow-card p-5">
-              <div className="flex items-center gap-4">
-                <ProgressRing value={weekPoints} max={WEEKLY_GOAL} color="#10b981" size={92} stroke={9}>
-                  <span className="text-2xl font-bold text-ink-900 num">{weekPoints}</span>
-                  <span className="text-[9px] text-ink-400">/ {WEEKLY_GOAL}</span>
-                </ProgressRing>
-                <div className="flex-1">
-                  <p className="text-[11px] text-ink-400 font-medium">เป้าหมายสัปดาห์นี้</p>
-                  <p className="text-base font-bold text-ink-900 mt-0.5">
-                    {weekPoints>=WEEKLY_GOAL ? 'ทำสำเร็จแล้ว! 🎉' : `อีก ${WEEKLY_GOAL-weekPoints} คะแนน`}
-                  </p>
-                  <div className="flex gap-2 mt-3">
-                    <Chip icon="fa-star" tone="brand" label={`${myPoints} คะแนนรวม`}/>
-                    {myPending>0 && <Chip icon="fa-hourglass-half" tone="amber" label={`รอตรวจ ${myPending}`}/>}
+          <div className="fade-up space-y-4">
+            
+            <div className="bg-white rounded-3xl shadow-card p-5 border-t-4 border-brand-500">
+              <h2 className="text-[14px] font-bold text-ink-700 mb-4 flex items-center"><i className="fas fa-calendar-week mr-2 text-brand-500"></i>สัปดาห์นี้</h2>
+              <div className="space-y-3.5">
+                <div className="flex items-center gap-3">
+                  <span className="w-16 text-xs text-ink-500 font-medium">คะแนน</span>
+                  <div className="flex-1 h-3 bg-paper rounded-full overflow-hidden">
+                    <div className="h-full bg-brand-500 rounded-full" style={{width: `${(currWeekGradingHP/600)*100}%`}}></div>
                   </div>
+                  <span className="text-xs font-bold w-12 text-right">{(currWeekGradingHP/100).toFixed(1)} <span className="text-ink-400 font-normal">/ 6.0</span></span>
                 </div>
-              </div>
-              <div className="grid grid-cols-3 divide-x divide-slate-100 mt-5 pt-4 border-t border-slate-100 text-center">
-                <Stat value={myPoints} label="คะแนนสะสม" tone="text-brand-600"/>
-                <Stat value={myTasks.filter(t=>t.status==='approved').length} label="กิจกรรมสำเร็จ" tone="text-sky-600"/>
-                <Stat value={myRank>0?`#${myRank}`:'—'} label="อันดับ" tone="text-amber-500"/>
+                <div className="flex items-center gap-3">
+                  <span className="w-16 text-xs text-ink-500 font-medium">HP (แต้ม)</span>
+                  <div className="flex-1 h-3 bg-paper rounded-full overflow-hidden">
+                    <div className="h-full bg-sky-500 rounded-full" style={{width: `${Math.min(100,(currWeekAccHP/700)*100)}%`}}></div>
+                  </div>
+                  <span className="text-xs font-bold w-12 text-right">{currWeekAccHP}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-16 text-xs text-ink-500 font-medium">HP วันนี้</span>
+                  <div className="flex-1 h-3 bg-paper rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-400 rounded-full" style={{width: `${(todayHP/100)*100}%`}}></div>
+                  </div>
+                  <span className="text-xs font-bold w-12 text-right">{todayHP} <span className="text-ink-400 font-normal">/ 100</span></span>
+                </div>
               </div>
             </div>
 
-            {/* กิจกรรม */}
+            <div className="bg-white rounded-3xl shadow-card p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                 <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center text-xl shadow-inner"><i className="fas fa-trophy"></i></div>
+                 <div>
+                   <p className="text-[11px] text-ink-400 font-medium">🏆 HP สะสม (จัดอันดับ)</p>
+                   <p className="text-[13px] font-bold text-ink-900 mt-0.5">{myRank > 0 ? `อันดับ #${myRank} ของโรงเรียน` : 'ยังไม่มีอันดับ'}</p>
+                 </div>
+              </div>
+              <div className="text-right">
+                 <p className="text-2xl font-bold text-amber-500 num leading-none">{stats.totalAcc}</p>
+                 <p className="text-[10px] text-ink-400 mt-1">HP</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl shadow-card p-5 relative overflow-hidden">
+              <div className="absolute top-0 right-0 bg-brand-50 px-4 py-2.5 rounded-bl-2xl">
+                <span className="text-xs text-brand-700 font-bold">คะแนนตอนนี้ {stats.totalScore} / 10</span>
+              </div>
+              <h2 className="text-[14px] font-bold text-ink-900 mb-4">โครงสร้างคะแนนรวม</h2>
+              
+              <div className="space-y-2.5 mb-5">
+                 <div className="flex justify-between text-[13px] border-b border-slate-50 pb-2">
+                    <span className="text-ink-600"><span className="font-bold w-4 inline-block">A</span> ปริมาณ ({stats.totalGrading} HP)</span>
+                    <span className="font-bold">{stats.scoreA.toFixed(1)} <span className="text-ink-300 font-normal">/ 7.0</span></span>
+                 </div>
+                 <div className="flex justify-between text-[13px] border-b border-slate-50 pb-2">
+                    <span className="text-ink-600"><span className="font-bold w-4 inline-block">B</span> สม่ำเสมอ ({stats.activeWeeks} สัปดาห์)</span>
+                    <span className="font-bold">{stats.scoreB.toFixed(1)} <span className="text-ink-300 font-normal">/ 2.0</span></span>
+                 </div>
+                 <div className="flex justify-between text-[13px] pb-1">
+                    <span className="text-ink-600"><span className="font-bold w-4 inline-block">C</span> หลากหลาย ({stats.variety} ชนิด)</span>
+                    <span className="font-bold">{stats.scoreC.toFixed(1)} <span className="text-ink-300 font-normal">/ 1.0</span></span>
+                 </div>
+              </div>
+              
+              <div className="bg-sky-50 rounded-2xl p-3.5 flex gap-3 items-start">
+                 <i className="fas fa-lightbulb text-sky-500 mt-0.5 text-lg"></i>
+                 <p className="text-[11.5px] text-sky-800 font-medium leading-relaxed">
+                    อีก <strong className="text-sky-600">{hpNeeded} HP</strong> (ประมาณวิ่ง {Math.ceil(hpNeeded/0.55)} นาที หรือเต้น {Math.ceil(hpNeeded/0.45)} นาที) จะได้คะแนน A เพิ่มขึ้น
+                 </p>
+              </div>
+            </div>
+
             <div>
               <SectionTitle icon="fa-bolt" color="text-amber-500" title="เลือกกิจกรรม" sub="แตะเพื่อเริ่มบันทึก"/>
               <div className="space-y-2.5">
                 {ACTIVITIES.map(a=>(
-                  <button key={a.id} onClick={()=>navigate('activity',a)}
-                    className="w-full bg-white rounded-3xl shadow-card p-4 flex items-center gap-4 press text-left">
-                    <div className={`w-14 h-14 rounded-2xl ${a.tint} flex items-center justify-center flex-shrink-0`}>
-                      <i className={`fas ${a.icon} text-xl ${a.text}`}></i>
-                    </div>
+                  <button key={a.id} onClick={()=>navigate('activity',a)} className="w-full bg-white rounded-3xl shadow-card p-4 flex items-center gap-4 press text-left">
+                    <div className={`w-14 h-14 rounded-2xl ${a.tint} flex items-center justify-center flex-shrink-0`}><i className={`fas ${a.icon} text-xl ${a.text}`}></i></div>
                     <div className="flex-1 min-w-0">
                       <p className="font-bold text-ink-900 text-[15px] leading-tight">{a.name}</p>
                       <p className="text-[11px] text-ink-400 mt-0.5 truncate">{a.desc}</p>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <span className={`text-xs font-bold ${a.text}`}>+{a.points}</span>
-                      <p className="text-[9px] text-ink-400">คะแนน</p>
                     </div>
                     <i className="fas fa-chevron-right text-xs text-ink-400/60"></i>
                   </button>
                 ))}
               </div>
             </div>
-
-            {/* ล่าสุด */}
-            {myTasks.length>0 && (
-              <div>
-                <SectionTitle icon="fa-clock-rotate-left" color="text-sky-500" title="กิจกรรมล่าสุด"
-                  action={<button onClick={()=>navigate('history')} className="text-xs font-semibold text-brand-600">ดูทั้งหมด</button>}/>
-                <div className="bg-white rounded-3xl shadow-card p-2">
-                  {myTasks.slice(0,3).map(t=><TaskRow key={t.id} t={t}/>)}
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -598,18 +645,12 @@ function App(){
         {isStudent && activeTab==='activity' && selectedAct && (
           <div className="fade-up space-y-4">
             <div className="bg-white rounded-3xl shadow-card p-5 flex items-center gap-4">
-              <div className={`w-16 h-16 rounded-2xl ${selectedAct.tint} flex items-center justify-center flex-shrink-0`}>
-                <i className={`fas ${selectedAct.icon} text-2xl ${selectedAct.text}`}></i>
-              </div>
+              <div className={`w-16 h-16 rounded-2xl ${selectedAct.tint} flex items-center justify-center flex-shrink-0`}><i className={`fas ${selectedAct.icon} text-2xl ${selectedAct.text}`}></i></div>
               <div className="min-w-0">
                 <h2 className="text-lg font-bold text-ink-900 leading-tight">{selectedAct.name}</h2>
                 <p className="text-xs text-ink-400 mt-1">{selectedAct.desc}</p>
-                <span className={`inline-block mt-2 text-[11px] font-bold ${selectedAct.text} ${selectedAct.tint} px-2.5 py-1 rounded-full`}>
-                  +{selectedAct.points} คะแนน
-                </span>
               </div>
             </div>
-
             {selectedAct.type==='gps' ? (
               <div className="bg-white rounded-3xl shadow-card p-6">
                 <div className="flex justify-center">
@@ -621,105 +662,66 @@ function App(){
                     </ProgressRing>
                   </div>
                 </div>
-
                 <div className="grid grid-cols-2 gap-2.5 mt-6">
                   <MiniStat icon="fa-stopwatch" value={fmtTime(elapsedTime)} label="เวลาทั้งหมด" tone="text-ink-900"/>
                   <MiniStat icon="fa-shoe-prints" value={fmtTime(movingTime)} label="เวลาที่เคลื่อนที่" tone="text-brand-600"/>
                 </div>
-
                 {isTracking && (
                   <div className={`mt-3 flex items-center justify-center gap-2 text-xs font-semibold ${gpsInfo[0]} ${gpsInfo[1]} rounded-2xl py-2.5`}>
-                    <i className={`fas ${gpsInfo[2]}`}></i>{gpsInfo[3]}
-                    {gpsAcc!==null&&gpsState!=='weak' && <span className="text-ink-400 font-normal">±{gpsAcc} ม.</span>}
+                    <i className={`fas ${gpsInfo[2]}`}></i>{gpsInfo[3]} {gpsAcc!==null&&gpsState!=='weak' && <span className="text-ink-400 font-normal">±{gpsAcc} ม.</span>}
                   </div>
                 )}
-
-                <button onClick={isTracking?stopRunning:startRunning}
-                  className={`w-full h-14 mt-4 rounded-2xl font-bold text-white shadow-lift press ${isTracking?'bg-rose-500':'bg-brand-600'}`}>
+                <button onClick={isTracking?stopRunning:startRunning} className={`w-full h-14 mt-4 rounded-2xl font-bold text-white shadow-lift press ${isTracking?'bg-rose-500':'bg-brand-600'}`}>
                   <i className={`fas ${isTracking?'fa-stop':'fa-play'} mr-2 text-sm`}></i>{isTracking?'หยุดจับเวลา':'เริ่มวิ่ง'}
                 </button>
-
-                {!isTracking && distance===0 && (
-                  <div className="mt-4 bg-paper rounded-2xl p-3.5 text-[11px] text-ink-500 leading-relaxed">
-                    <p className="font-semibold text-ink-700 mb-1"><i className="fas fa-lightbulb text-amber-500 mr-1.5"></i>เคล็ดลับให้แม่นยำ</p>
-                    <p>• ออกมากลางแจ้ง หลีกเลี่ยงใต้ตึกสูง</p>
-                    <p>• เปิดหน้าจอค้างไว้ระหว่างวิ่ง</p>
-                    <p>• ระบบนับเฉพาะตอนเคลื่อนที่จริงเท่านั้น</p>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="bg-white rounded-3xl shadow-card p-5">
                 <div className="grid grid-cols-2 gap-3">
-                  <PhotoSlot label="ก่อนเริ่ม" step="1" img={imgBefore} time={timeBefore}
-                    onPick={e=>handleUpload(e,1)} onView={setPreview} disabled={busy}/>
-                  <PhotoSlot label="หลังเสร็จ" step="2" img={imgAfter} time={timeAfter}
-                    onPick={e=>handleUpload(e,2)} onView={setPreview} disabled={busy||!imgBefore}
-                    hint={!imgBefore?'ถ่ายรูปแรกก่อน':null}/>
+                  <PhotoSlot label="ก่อนเริ่ม" step="1" img={imgBefore} time={timeBefore} onPick={e=>handleUpload(e,1)} onView={setPreview} onDelete={deleteBeforePhoto} disabled={busy}/>
+                  <PhotoSlot label="หลังเสร็จ" step="2" img={imgAfter} time={timeAfter} onPick={e=>handleUpload(e,2)} onView={setPreview} disabled={busy||!imgBefore} hint={!imgBefore?'ถ่ายรูปแรกก่อน':null}/>
                 </div>
                 <div className="mt-4">
                   <div className="flex justify-between text-xs mb-2">
                     <span className="text-ink-500 font-medium"><i className="fas fa-stopwatch mr-1.5"></i>ระยะเวลา</span>
-                    <span className={`font-bold ${timeDiffMinutes>=selectedAct.minMin?'text-brand-600':'text-amber-600'}`}>
-                      {timeDiffMinutes} / {selectedAct.minMin} นาที
-                    </span>
+                    <span className={`font-bold ${timeDiffMinutes>=selectedAct.minMin?'text-brand-600':'text-amber-600'}`}>{timeDiffMinutes} / {selectedAct.minMin} นาที</span>
                   </div>
                   <div className="h-2.5 bg-paper rounded-full overflow-hidden">
-                    <div className={`h-full rounded-full transition-all duration-500 ${timeDiffMinutes>=selectedAct.minMin?'bg-brand-500':'bg-amber-400'}`}
-                      style={{width:`${Math.min(100,(timeDiffMinutes/selectedAct.minMin)*100)}%`}}></div>
+                    <div className={`h-full rounded-full transition-all duration-500 ${timeDiffMinutes>=selectedAct.minMin?'bg-brand-500':'bg-amber-400'}`} style={{width:`${Math.min(100,(timeDiffMinutes/selectedAct.minMin)*100)}%`}}></div>
                   </div>
                 </div>
               </div>
             )}
-
-            <button onClick={submitTask} disabled={busy}
-              className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold shadow-lift press disabled:opacity-50">
+            <button onClick={submitTask} disabled={busy} className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold shadow-lift press disabled:opacity-50">
               {busy?<><i className="fas fa-spinner fa-spin mr-2"></i>กำลังส่ง...</>:<><i className="fas fa-paper-plane mr-2 text-sm"></i>ส่งให้ครูตรวจ</>}
-            </button>
-            <button onClick={resetActivity}
-              className="w-full h-12 rounded-2xl bg-white text-ink-500 font-semibold shadow-card press">
-              <i className="fas fa-arrow-left mr-2 text-xs"></i>ย้อนกลับ
             </button>
           </div>
         )}
 
-        {isStudent && activeTab==='activity' && !selectedAct && (
-          <EmptyCard icon="fa-inbox" text="ไม่พบกิจกรรมที่เลือก"
-            action={<button onClick={()=>setActiveTab('home')} className="mt-4 px-6 h-11 bg-brand-600 text-white rounded-2xl font-semibold press">กลับหน้าหลัก</button>}/>
-        )}
-
         {/* ================= LEADERBOARD ================= */}
         {activeTab==='leaderboard' && (
-          <div className="fade-up">
-            <div className="bg-white rounded-3xl shadow-card p-4">
-              <SectionTitle icon="fa-trophy" color="text-amber-500" title="อันดับคะแนน" sub="Top 10 ของโรงเรียน" flush/>
-              {loadingData ? <SkeletonList/> : leaderboard.length===0 ? <EmptyInline text="ยังไม่มีข้อมูล"/> : (
-                <div className="space-y-1.5 mt-3">
-                  {leaderboard.map((r,i)=>{
-                    const me=r.name===user.name;
-                    const medal=['bg-amber-400','bg-slate-300','bg-orange-400'][i]||'bg-slate-200';
-                    return (
-                      <div key={r.name}
-                        className={`flex items-center gap-3 p-3 rounded-2xl transition ${me?'bg-brand-50 ring-1 ring-brand-200':'bg-paper'}`}>
-                        <span className={`w-9 h-9 rounded-xl ${medal} ${i<3?'text-white':'text-ink-700'} flex items-center justify-center font-bold text-sm flex-shrink-0`}>
-                          {i<3?<i className="fas fa-crown text-xs"></i>:i+1}
-                        </span>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-ink-900 text-sm truncate">
-                            {r.name}{me && <span className="text-[10px] text-brand-600 font-bold ml-1.5">คุณ</span>}
-                          </p>
-                          <p className="text-[11px] text-ink-400">ห้อง {r.room} · {r.count} กิจกรรม</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <span className="font-bold text-brand-600 num">{r.points}</span>
-                          <p className="text-[9px] text-ink-400">คะแนน</p>
-                        </div>
+          <div className="fade-up bg-white rounded-3xl shadow-card p-4">
+            <SectionTitle icon="fa-trophy" color="text-amber-500" title="อันดับ HP สะสม" sub="Top 10 ของโรงเรียน" flush/>
+            {loadingData ? <SkeletonList/> : leaderboard.length===0 ? <EmptyInline text="ยังไม่มีข้อมูล"/> : (
+              <div className="space-y-1.5 mt-3">
+                {leaderboard.map((r,i)=>{
+                  const me=r.name===user.name; const medal=['bg-amber-400','bg-slate-300','bg-orange-400'][i]||'bg-slate-200';
+                  return (
+                    <div key={r.name} className={`flex items-center gap-3 p-3 rounded-2xl transition ${me?'bg-brand-50 ring-1 ring-brand-200':'bg-paper'}`}>
+                      <span className={`w-9 h-9 rounded-xl ${medal} ${i<3?'text-white':'text-ink-700'} flex items-center justify-center font-bold text-sm flex-shrink-0`}>{i<3?<i className="fas fa-crown text-xs"></i>:i+1}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-ink-900 text-sm truncate">{r.name}{me && <span className="text-[10px] text-brand-600 font-bold ml-1.5">คุณ</span>}</p>
+                        <p className="text-[11px] text-ink-400">ห้อง {r.room}</p>
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className="font-bold text-brand-600 num">{r.points}</span>
+                        <p className="text-[9px] text-ink-400">HP</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
 
@@ -737,47 +739,31 @@ function App(){
         {!isStudent && activeTab==='review' && (
           <div className="fade-up space-y-3">
             <div className="bg-white rounded-3xl shadow-card p-4 flex items-center gap-3">
-              <div className="w-12 h-12 rounded-2xl bg-brand-50 flex items-center justify-center">
-                <i className="fas fa-clipboard-check text-lg text-brand-600"></i>
-              </div>
-              <div className="flex-1">
-                <p className="font-bold text-ink-900">รายการรอตรวจสอบ</p>
-                <p className="text-[11px] text-ink-400">แตะรูปเพื่อดูขนาดเต็ม</p>
-              </div>
+              <div className="w-12 h-12 rounded-2xl bg-brand-50 flex items-center justify-center"><i className="fas fa-clipboard-check text-lg text-brand-600"></i></div>
+              <div className="flex-1"><p className="font-bold text-ink-900">รายการรอตรวจสอบ</p><p className="text-[11px] text-ink-400">แตะรูปเพื่อดูขนาดเต็ม</p></div>
               <span className="bg-amber-50 text-amber-600 px-3.5 py-1.5 rounded-full text-sm font-bold num">{pendingAll.length}</span>
             </div>
-
-            {loadingData ? <SkeletonList/> : pendingAll.length===0 ? (
-              <EmptyCard icon="fa-circle-check" tone="text-brand-400" text="ตรวจครบทุกรายการแล้ว 🎉"/>
+            {loadingData ? <SkeletonList/> : pendingAll.length===0 ? ( <EmptyCard icon="fa-circle-check" tone="text-brand-400" text="ตรวจครบทุกรายการแล้ว 🎉"/>
             ) : pendingAll.map(t=>{
               const a=actById(t.activityId);
               return (
                 <div key={t.id} className="bg-white rounded-3xl shadow-card p-4 fade-up">
                   <div className="flex items-center gap-3">
-                    <div className="w-11 h-11 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center font-bold flex-shrink-0">
-                      {initial(t.studentName)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="font-bold text-ink-900 truncate text-sm">{t.studentName}</p>
-                      <p className="text-[11px] text-ink-400">ห้อง {t.room} · {fmtDT(t.createdAt)}</p>
-                    </div>
-                    <span className="text-xs bg-brand-50 text-brand-600 px-2.5 py-1 rounded-full font-bold whitespace-nowrap">+{t.points}</span>
+                    <div className="w-11 h-11 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center font-bold flex-shrink-0">{initial(t.studentName)}</div>
+                    <div className="min-w-0 flex-1"><p className="font-bold text-ink-900 truncate text-sm">{t.studentName}</p><p className="text-[11px] text-ink-400">ห้อง {t.room} · {fmtDT(t.createdAt)}</p></div>
+                    <span className="text-xs bg-brand-50 text-brand-600 px-2.5 py-1 rounded-full font-bold whitespace-nowrap">+{t.hp||0} HP</span>
                   </div>
-
                   <div className={`mt-3 ${a?.tint||'bg-paper'} rounded-2xl p-3 flex items-center gap-2.5`}>
                     <i className={`fas ${a?.icon||'fa-star'} ${a?.text||'text-ink-500'}`}></i>
                     <span className="text-sm font-semibold text-ink-900">{t.activityName}</span>
                     {t.distance!=null && <span className="ml-auto text-sm font-bold text-ink-900 num">{t.distance} กม.</span>}
                   </div>
-
                   {(t.duration||t.avgPace!=null) && (
                     <div className="flex flex-wrap gap-1.5 mt-2">
                       {t.duration ? <Chip icon="fa-stopwatch" tone="slate" label={`${Math.round(t.duration/60)} นาที`}/> : null}
-                      {t.movingTime!=null && <Chip icon="fa-shoe-prints" tone="slate" label={`เคลื่อนที่ ${Math.round(t.movingTime/60)} นาที`}/>}
                       {t.avgPace!=null && <Chip icon="fa-gauge-high" tone={t.avgPace<3?'amber':'slate'} label={`${t.avgPace} นาที/กม.`}/>}
                     </div>
                   )}
-
                   {(t.imgBefore||t.imgAfter) && (
                     <div className="grid grid-cols-2 gap-2 mt-3">
                       {[['ก่อน',t.imgBefore,t.timeBefore],['หลัง',t.imgAfter,t.timeAfter]].map(([l,src,tm])=>src&&(
@@ -788,16 +774,9 @@ function App(){
                       ))}
                     </div>
                   )}
-
                   <div className="grid grid-cols-2 gap-2 mt-4">
-                    <button onClick={()=>review(t.id,'rejected')}
-                      className="h-12 rounded-2xl bg-rose-50 text-rose-600 font-bold press text-sm">
-                      <i className="fas fa-xmark mr-1.5"></i>ปฏิเสธ
-                    </button>
-                    <button onClick={()=>review(t.id,'approved')}
-                      className="h-12 rounded-2xl bg-brand-600 text-white font-bold press text-sm shadow-lift">
-                      <i className="fas fa-check mr-1.5"></i>อนุมัติ
-                    </button>
+                    <button onClick={()=>review(t.id,'rejected')} className="h-12 rounded-2xl bg-rose-50 text-rose-600 font-bold press text-sm"><i className="fas fa-xmark mr-1.5"></i>ปฏิเสธ</button>
+                    <button onClick={()=>review(t.id,'approved')} className="h-12 rounded-2xl bg-brand-600 text-white font-bold press text-sm shadow-lift"><i className="fas fa-check mr-1.5"></i>อนุมัติ</button>
                   </div>
                 </div>
               );
@@ -806,7 +785,6 @@ function App(){
         )}
       </main>
 
-      {/* ===== BOTTOM NAV ===== */}
       <nav className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-lg border-t border-slate-100 shadow-nav safe-b z-40">
         <div className="flex max-w-lg mx-auto">
           {(isStudent
@@ -815,11 +793,8 @@ function App(){
           ).map(([tab,label,ic])=>{
             const on = activeTab===tab || (tab==='home'&&activeTab==='activity');
             return (
-              <button key={tab} onClick={()=>{ if(activeTab==='activity') resetActivity(); navigate(tab); }}
-                className="flex-1 py-2.5 flex flex-col items-center gap-0.5 press">
-                <span className={`w-11 h-8 rounded-full flex items-center justify-center transition-all ${on?'bg-brand-50':''}`}>
-                  <i className={`fas ${ic} text-[17px] ${on?'text-brand-600':'text-ink-400'}`}></i>
-                </span>
+              <button key={tab} onClick={()=>{ if(activeTab==='activity') resetActivity(); navigate(tab); }} className="flex-1 py-2.5 flex flex-col items-center gap-0.5 press">
+                <span className={`w-11 h-8 rounded-full flex items-center justify-center transition-all ${on?'bg-brand-50':''}`}><i className={`fas ${ic} text-[17px] ${on?'text-brand-600':'text-ink-400'}`}></i></span>
                 <span className={`text-[10px] font-semibold ${on?'text-brand-600':'text-ink-400'}`}>{label}</span>
               </button>
             );
@@ -834,134 +809,89 @@ function App(){
    5) UI COMPONENTS
 ============================================================ */
 function Toast({toast}){
-  if(!toast) return null;
-  const ok=toast.type==='success';
+  if(!toast) return null; const ok=toast.type==='success';
   return (
     <div className="fixed bottom-24 inset-x-0 z-[60] flex justify-center px-6 pointer-events-none">
-      <div className={`toast-up flex items-center gap-2.5 px-4 py-3 rounded-2xl shadow-lift text-white text-sm font-semibold max-w-xs
-        ${ok?'bg-ink-900':'bg-rose-500'}`}>
-        <i className={`fas ${ok?'fa-circle-check text-brand-400':'fa-circle-exclamation'} `}></i>
-        <span className="leading-snug">{toast.msg}</span>
+      <div className={`toast-up flex items-center gap-2.5 px-4 py-3 rounded-2xl shadow-lift text-white text-sm font-semibold max-w-xs ${ok?'bg-ink-900':'bg-rose-500'}`}>
+        <i className={`fas ${ok?'fa-circle-check text-brand-400':'fa-circle-exclamation'} `}></i><span className="leading-snug">{toast.msg}</span>
       </div>
     </div>
   );
 }
-
 function ProgressRing({value,max,color,size=100,stroke=10,children}){
-  const r=(size-stroke)/2, c=2*Math.PI*r;
-  const pct=Math.min(1,Math.max(0,(value||0)/(max||1)));
+  const r=(size-stroke)/2, c=2*Math.PI*r, pct=Math.min(1,Math.max(0,(value||0)/(max||1)));
   return (
     <div className="relative flex-shrink-0" style={{width:size,height:size}}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#eef4f1" strokeWidth={stroke}/>
-        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke}
-          strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c*(1-pct)}
-          style={{transition:'stroke-dashoffset .6s cubic-bezier(.3,.9,.3,1)'}}/>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c*(1-pct)} style={{transition:'stroke-dashoffset .6s cubic-bezier(.3,.9,.3,1)'}}/>
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">{children}</div>
     </div>
   );
 }
-
 const Field=({icon,type='text',value,onChange,placeholder})=>(
   <div className="relative">
     <i className={`fas ${icon} absolute left-4 top-1/2 -translate-y-1/2 text-ink-400 text-sm`}></i>
-    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder}
-      className="w-full h-14 pl-11 pr-4 rounded-2xl bg-paper border border-transparent
-        focus:bg-white focus:border-brand-400 focus:ring-4 focus:ring-brand-100 outline-none
-        text-ink-900 placeholder:text-ink-400 transition"/>
+    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} className="w-full h-14 pl-11 pr-4 rounded-2xl bg-paper border border-transparent focus:bg-white focus:border-brand-400 focus:ring-4 focus:ring-brand-100 outline-none text-ink-900 placeholder:text-ink-400 transition"/>
   </div>
 );
-
-const Stat=({value,label,tone})=>(
-  <div><p className={`text-2xl font-bold num ${tone}`}>{value}</p><p className="text-[10px] text-ink-400 mt-0.5">{label}</p></div>
-);
-
 const MiniStat=({icon,value,label,tone})=>(
   <div className="bg-paper rounded-2xl py-3 text-center">
     <p className={`text-xl font-bold num ${tone}`}><i className={`fas ${icon} text-[11px] text-ink-400 mr-1.5`}></i>{value}</p>
     <p className="text-[10px] text-ink-400 mt-0.5">{label}</p>
   </div>
 );
-
 const Chip=({icon,label,tone='slate'})=>{
   const t={brand:'bg-brand-50 text-brand-600',amber:'bg-amber-50 text-amber-600',slate:'bg-paper text-ink-500'}[tone];
-  return <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full ${t}`}>
-    <i className={`fas ${icon}`}></i>{label}</span>;
+  return <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full ${t}`}><i className={`fas ${icon}`}></i>{label}</span>;
 };
-
-const SectionTitle=({icon,color,title,sub,action,flush})=>(
+const SectionTitle=({icon,color,title,sub,flush})=>(
   <div className={`flex items-end justify-between ${flush?'':'px-1 mb-2.5'}`}>
-    <div>
-      <h2 className="font-bold text-ink-900 text-[15px]"><i className={`fas ${icon} ${color} mr-2 text-sm`}></i>{title}</h2>
-      {sub && <p className="text-[11px] text-ink-400 mt-0.5 ml-6">{sub}</p>}
-    </div>
-    {action}
+    <div><h2 className="font-bold text-ink-900 text-[15px]"><i className={`fas ${icon} ${color} mr-2 text-sm`}></i>{title}</h2>{sub && <p className="text-[11px] text-ink-400 mt-0.5 ml-6">{sub}</p>}</div>
   </div>
 );
-
 const TaskRow=({t})=>{
   const a=actById(t.activityId);
   return (
     <div className="flex items-center gap-3 p-3 rounded-2xl hover:bg-paper transition">
-      <div className={`w-10 h-10 rounded-xl ${a?.tint||'bg-paper'} flex items-center justify-center flex-shrink-0`}>
-        <i className={`fas ${a?.icon||'fa-star'} text-sm ${a?.text||'text-ink-500'}`}></i>
-      </div>
-      <div className="flex-1 min-w-0">
-        <p className="font-semibold text-sm text-ink-900 truncate">{t.activityName}</p>
-        <p className="text-[11px] text-ink-400">{fmtDT(t.createdAt)}{t.distance!=null?` · ${t.distance} กม.`:''}</p>
-      </div>
+      <div className={`w-10 h-10 rounded-xl ${a?.tint||'bg-paper'} flex items-center justify-center flex-shrink-0`}><i className={`fas ${a?.icon||'fa-star'} text-sm ${a?.text||'text-ink-500'}`}></i></div>
+      <div className="flex-1 min-w-0"><p className="font-semibold text-sm text-ink-900 truncate">{t.activityName}</p><p className="text-[11px] text-ink-400">{fmtDT(t.createdAt)}{t.hp!=null?` · ${t.hp} HP`:''}</p></div>
       <StatusBadge s={t.status}/>
     </div>
   );
 };
-
 const StatusBadge=({s})=>{
-  const m={approved:['bg-brand-50 text-brand-600','fa-check','อนุมัติ'],
-           pending:['bg-amber-50 text-amber-600','fa-hourglass-half','รอตรวจ'],
-           rejected:['bg-rose-50 text-rose-600','fa-xmark','ไม่ผ่าน']};
+  const m={approved:['bg-brand-50 text-brand-600','fa-check','อนุมัติ'], pending:['bg-amber-50 text-amber-600','fa-hourglass-half','รอตรวจ'], rejected:['bg-rose-50 text-rose-600','fa-xmark','ไม่ผ่าน']};
   const [cls,ic,txt]=m[s]||m.pending;
-  return <span className={`text-[10px] px-2.5 py-1.5 rounded-full font-bold whitespace-nowrap flex-shrink-0 ${cls}`}>
-    <i className={`fas ${ic} mr-1`}></i>{txt}</span>;
+  return <span className={`text-[10px] px-2.5 py-1.5 rounded-full font-bold whitespace-nowrap flex-shrink-0 ${cls}`}><i className={`fas ${ic} mr-1`}></i>{txt}</span>;
 };
+const SkeletonList=()=><div className="space-y-2 mt-3">{[0,1,2].map(i=><div key={i} className="h-16 rounded-2xl shimmer"></div>)}</div>;
+const EmptyInline=({text})=><div className="py-12 text-center"><i className="fas fa-inbox text-3xl text-ink-400/40"></i><p className="text-sm text-ink-400 mt-2">{text}</p></div>;
+const EmptyCard=({icon,text,tone='text-ink-400/40'})=><div className="bg-white rounded-3xl shadow-card p-12 text-center fade-up"><i className={`fas ${icon} text-5xl ${tone}`}></i><p className="text-ink-500 mt-3 font-medium">{text}</p></div>;
 
-const SkeletonList=()=>(
-  <div className="space-y-2 mt-3">
-    {[0,1,2].map(i=><div key={i} className="h-16 rounded-2xl shimmer"></div>)}
-  </div>
-);
-const EmptyInline=({text})=>(
-  <div className="py-12 text-center"><i className="fas fa-inbox text-3xl text-ink-400/40"></i><p className="text-sm text-ink-400 mt-2">{text}</p></div>
-);
-const EmptyCard=({icon,text,tone='text-ink-400/40',action})=>(
-  <div className="bg-white rounded-3xl shadow-card p-12 text-center fade-up">
-    <i className={`fas ${icon} text-5xl ${tone}`}></i>
-    <p className="text-ink-500 mt-3 font-medium">{text}</p>{action}
-  </div>
-);
-
-function PhotoSlot({label,step,img,time,onPick,onView,disabled,hint}){
+function PhotoSlot({label,step,img,time,onPick,onView,onDelete,disabled,hint}){
   const id='f_'+step;
   return (
     <div>
       <p className="text-xs font-semibold text-ink-700 mb-2 flex items-center gap-1.5">
-        <span className={`w-4 h-4 rounded-full text-[9px] flex items-center justify-center text-white ${img?'bg-brand-500':'bg-ink-400/50'}`}>
-          {img?<i className="fas fa-check text-[7px]"></i>:step}
-        </span>{label}
+        <span className={`w-4 h-4 rounded-full text-[9px] flex items-center justify-center text-white ${img?'bg-brand-500':'bg-ink-400/50'}`}>{img?<i className="fas fa-check text-[7px]"></i>:step}</span>{label}
       </p>
       {img ? (
-        <div onClick={()=>onView(img)} className="relative press cursor-pointer">
-          <img src={img} className="w-full h-36 object-cover rounded-2xl" alt={label}/>
-          <span className="absolute bottom-2 left-2 bg-black/65 text-white text-[9px] px-2 py-1 rounded-lg backdrop-blur-sm">
-            <i className="fas fa-clock mr-1"></i>{fmtDT(time)}
-          </span>
+        <div className="relative group">
+          <div onClick={()=>onView(img)} className="relative press cursor-pointer">
+            <img src={img} className="w-full h-36 object-cover rounded-2xl" alt={label}/>
+            <span className="absolute bottom-2 left-2 bg-black/65 text-white text-[9px] px-2 py-1 rounded-lg backdrop-blur-sm"><i className="fas fa-clock mr-1"></i>{fmtDT(time)}</span>
+          </div>
+          {onDelete && !disabled && (
+            <button onClick={(e)=>{ e.stopPropagation(); onDelete(); }} className="absolute -top-2 -right-2 w-7 h-7 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-md press">
+              <i className="fas fa-trash-alt text-[10px]"></i>
+            </button>
+          )}
         </div>
       ) : (
-        <label htmlFor={id}
-          className={`h-36 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-1.5 transition
-            ${disabled?'border-slate-200 bg-paper text-ink-400/50':'border-brand-300 bg-brand-50/50 text-brand-600 cursor-pointer active:scale-95'}`}>
-          <i className="fas fa-camera text-2xl"></i>
-          <span className="text-[11px] font-semibold">{hint||'แตะเพื่อถ่ายรูป'}</span>
+        <label htmlFor={id} className={`h-36 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-1.5 transition ${disabled?'border-slate-200 bg-paper text-ink-400/50':'border-brand-300 bg-brand-50/50 text-brand-600 cursor-pointer active:scale-95'}`}>
+          <i className="fas fa-camera text-2xl"></i><span className="text-[11px] font-semibold">{hint||'แตะเพื่อถ่ายรูป'}</span>
         </label>
       )}
       <input id={id} type="file" accept="image/*" capture="environment" disabled={disabled} onChange={onPick} className="hidden"/>
@@ -969,11 +899,7 @@ function PhotoSlot({label,step,img,time,onPick,onView,disabled,hint}){
   );
 }
 
-/* ============================================================
-   6) MOUNT
-============================================================ */
-ReactDOM.createRoot(document.getElementById('root'))
-  .render(<ErrorBoundary><App/></ErrorBoundary>);
+ReactDOM.createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);
 </script>
 </body>
 </html>
