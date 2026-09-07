@@ -3,58 +3,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Health Passport</title>
+    <title>Health Passport - Ultimate</title>
     
-    <!-- เครื่องมือเสริมทั้งหมด -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Firebase Compat (เสถียรที่สุดสำหรับรันบนเว็บมือถือ) -->
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
+    
+    <!-- React & Babel -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
     <style>
-        body { font-family: sans-serif; -webkit-tap-highlight-color: transparent; }
-        .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; background-color: #f1f5f9; }
+        .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 20px); }
+        .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+        .pulse-ring { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+        /* สไตล์สำหรับกล่องอัปโหลดรูป */
+        .upload-box { transition: all 0.2s ease-in-out; }
+        .upload-box.active { border-color: #3b82f6; background-color: #eff6ff; cursor: pointer; transform: scale(1.02); }
+        .upload-box.disabled { border-color: #e2e8f0; background-color: #f8fafc; opacity: 0.6; cursor: not-allowed; }
+        .upload-box.completed { border-color: #10b981; background-color: #fff; }
     </style>
 </head>
-<body class="bg-gray-100">
+<body>
     <div id="root"></div>
 
     <script type="text/babel">
-        // 🔥 กุญแจ FIREBASE ของคุณ 🔥
         const firebaseConfig = {
             apiKey: "AIzaSyD86PLSeOfkyVV8rCpc426G6MbEM_7Y4LU",
             authDomain: "health-passport-school.firebaseapp.com",
             projectId: "health-passport-school",
             storageBucket: "health-passport-school.firebasestorage.app",
             messagingSenderId: "282808112905",
-            appId: "1:282808112905:web:6a852eb4de9b9e146e65d8",
-            measurementId: "G-93S8363Z6Q"
+            appId: "1:282808112905:web:6a852eb4de9b9e146e65d8"
         };
 
-        if (!firebase.apps.length) {
-            firebase.initializeApp(firebaseConfig);
-        }
+        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
         const auth = firebase.auth();
         const db = firebase.firestore();
-        const APP_ID = 'health-passport';
+        const APP_ID = 'health-passport-ultimate'; 
         const TASKS_PATH = `artifacts/${APP_ID}/public/data/tasks`;
 
         const { useState, useEffect, useRef } = React;
 
+        // โครงสร้าง 4 กิจกรรม (วิ่ง GPS 1 อัน, ถ่ายรูป 3 อัน)
         const ACTIVITIES = [
-            { id: 1, title: 'Walk Challenge', desc: 'เดินสะสม 10,000 ก้าว', icon: 'fa-shoe-prints', points: 10, color: 'bg-blue-100 text-blue-600' },
-            { id: 2, title: 'Bike Day', desc: 'ปั่นจักรยาน 30 นาที', icon: 'fa-bicycle', points: 15, color: 'bg-green-100 text-green-600' },
-            { id: 3, title: 'Family Sport', desc: 'เล่นกีฬากับครอบครัว', icon: 'fa-users', points: 20, color: 'bg-orange-100 text-orange-600' },
-            { id: 4, title: 'Healthy Cooking', desc: 'ทำเมนูสุขภาพ 1 มื้อ', icon: 'fa-utensils', points: 15, color: 'bg-red-100 text-red-600' },
-            { id: 5, title: 'Nature Walk', desc: 'เดินสำรวจพรรณไม้', icon: 'fa-leaf', points: 10, color: 'bg-emerald-100 text-emerald-600' },
-            { id: 6, title: 'Yoga Together', desc: 'โยคะยืดเหยียด', icon: 'fa-face-smile', points: 15, color: 'bg-purple-100 text-purple-600' },
-            { id: 7, title: 'Mini Marathon', desc: 'วิ่งมินิมาราธอน', icon: 'fa-medal', points: 30, color: 'bg-yellow-100 text-yellow-600' },
-            { id: 8, title: 'Dance Challenge', desc: 'เต้นแอโรบิค', icon: 'fa-music', points: 15, color: 'bg-pink-100 text-pink-600' }
+            { id: 'run', title: 'วิ่งสะสมระยะทาง', type: 'gps', icon: 'fa-person-running', points: 15, color: 'from-blue-400 to-indigo-500', shadow: 'shadow-blue-200' },
+            { id: 'family', title: 'Sport Family', type: 'photo2', icon: 'fa-people-group', points: 20, color: 'from-orange-400 to-red-500', shadow: 'shadow-orange-200' },
+            { id: 'sport', title: 'เล่นกีฬา (ทั่วไป)', type: 'photo2', icon: 'fa-basketball', points: 15, color: 'from-emerald-400 to-green-500', shadow: 'shadow-emerald-200' },
+            { id: 'dance', title: 'Dancing', type: 'photo2', icon: 'fa-music', points: 15, color: 'from-pink-400 to-rose-500', shadow: 'shadow-pink-200' }
         ];
+
+        const getDistance = (lat1, lon1, lat2, lon2) => {
+            const R = 6371; const dLat = (lat2 - lat1) * (Math.PI / 180); const dLon = (lon2 - lon1) * (Math.PI / 180);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); 
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
+        };
+        const formatTime = (secs) => `${Math.floor(secs / 60).toString().padStart(2, '0')}:${(secs % 60).toString().padStart(2, '0')}`;
+        
+        const compressImage = (file) => {
+            return new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        const MAX = 400; // บีบอัดให้เล็กเพื่อให้เซฟเร็ว
+                        const scale = MAX / img.width;
+                        canvas.width = MAX; canvas.height = img.height * scale;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        resolve(canvas.toDataURL('image/jpeg', 0.6));
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        };
 
         function App() {
             const [user, setUser] = useState(null);
@@ -63,329 +94,453 @@
             const [studentName, setStudentName] = useState('');
             const [inputName, setInputName] = useState('');
             const [teacherPassword, setTeacherPassword] = useState('');
-
-            const [activeTab, setActiveTab] = useState('home');
-            const [selectedActivity, setSelectedActivity] = useState(null);
-            const [selectedImageBase64, setSelectedImageBase64] = useState(null);
-            const [showNotification, setShowNotification] = useState({ show: false, msg: '', type: 'success' });
-            const [isLoading, setIsLoading] = useState(false);
-            const fileInputRef = useRef(null);
+            const [activeTab, setActiveTab] = useState('home'); 
+            
             const [allTasks, setAllTasks] = useState([]);
+            const [showNotif, setShowNotif] = useState({ show: false, msg: '', type: 'success' });
+            const [isLoading, setIsLoading] = useState(false);
+            const [selectedAct, setSelectedAct] = useState(null);
+
+            // State สำหรับ GPS (วิ่ง)
+            const [isTracking, setIsTracking] = useState(false);
+            const [distance, setDistance] = useState(0);
+            const [elapsedTime, setElapsedTime] = useState(0);
+            const [gpsStatus, setGpsStatus] = useState({ text: 'รอเริ่ม...', color: 'text-gray-400' });
+
+            // State สำหรับถ่ายรูป 2 ใบ (Before/After)
+            const [imgBefore, setImgBefore] = useState(null);
+            const [imgAfter, setImgAfter] = useState(null);
+            const [timeBefore, setTimeBefore] = useState(null); // เก็บ Timestamp รูป 1
+            const [timeAfter, setTimeAfter] = useState(null);   // เก็บ Timestamp รูป 2
+            const [timeDiff, setTimeDiff] = useState(0);        // เวลารวมเป็นวินาที
+
+            const watchIdRef = useRef(null);
+            const timerRef = useRef(null);
+            const lastPosRef = useRef(null);
+            const fileInputRef1 = useRef(null);
+            const fileInputRef2 = useRef(null);
 
             useEffect(() => {
-                auth.signInAnonymously().catch(err => console.error(err));
-                const unsubscribe = auth.onAuthStateChanged(setUser);
-                return () => unsubscribe();
+                auth.signInAnonymously().catch(console.error);
+                return auth.onAuthStateChanged(setUser);
             }, []);
 
             useEffect(() => {
                 if (!user) return;
-                const unsubscribe = db.collection(TASKS_PATH)
-                    .onSnapshot(snapshot => {
-                        const tasksData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                        tasksData.sort((a, b) => b.createdAt - a.createdAt);
-                        setAllTasks(tasksData);
-                    }, err => console.error(err));
-                return () => unsubscribe();
+                const unsub = db.collection(TASKS_PATH).onSnapshot(snap => {
+                    const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // จัดเรียงฝั่ง Client ป้องกัน Error เรื่อง Index ของ Firestore
+                    data.sort((a, b) => b.createdAt - a.createdAt);
+                    setAllTasks(data);
+                });
+                return unsub;
             }, [user]);
 
-            const pendingTasks = allTasks.filter(t => t.status === 'pending');
-            
-            // ดึงคะแนนโดยอ้างอิงจาก "ชื่อ-นามสกุล" ทำให้คะแนนไม่หายเมื่อปิดแอป
-            const myApprovedTasks = allTasks.filter(t => t.status === 'approved' && t.studentName === studentName);
-            const myPoints = myApprovedTasks.reduce((sum, task) => sum + task.points, 0);
-
             const notify = (msg, type = 'success') => {
-                setShowNotification({ show: true, msg, type });
-                setTimeout(() => setShowNotification({ show: false, msg: '', type: 'success' }), 3000);
+                setShowNotif({ show: true, msg, type });
+                setTimeout(() => setShowNotif({ show: false, msg: '', type: '' }), 3000);
             };
 
-            const getLevel = (points) => {
-                if (points >= 100) return { name: 'Gold Rank', color: 'text-yellow-600 bg-yellow-100' };
-                if (points >= 50) return { name: 'Silver Rank', color: 'text-slate-500 bg-slate-100' };
-                return { name: 'Bronze Rank', color: 'text-orange-600 bg-orange-100' };
-            };
-
-            const handleLogin = (selectedRole) => {
-                if (selectedRole === 'student') {
-                    if (inputName.trim() === '') return notify('กรุณาใส่ชื่อของคุณ', 'error');
+            const handleLogin = (r) => {
+                if (r === 'student') {
+                    if (!inputName.trim()) return notify('กรุณาพิมพ์ชื่อนักเรียน', 'error');
                     setStudentName(inputName.trim());
+                } else {
+                    if (teacherPassword !== '191919') return notify('รหัสผ่านครูผิด!', 'error');
                 }
-                
-                if (selectedRole === 'teacher' && teacherPassword !== '191919') {
-                    return notify('รหัสผ่านไม่ถูกต้อง!', 'error');
-                }
-
-                setRole(selectedRole);
+                setRole(r);
                 setIsLoggedIn(true);
-                setActiveTab('home');
+                setActiveTab(r === 'student' ? 'home' : 'review');
                 setTeacherPassword('');
             };
 
-            const handleImageUpload = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (event) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        const MAX_WIDTH = 400;
-                        const scaleSize = MAX_WIDTH / img.width;
-                        canvas.width = MAX_WIDTH;
-                        canvas.height = img.height * scaleSize;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                        setSelectedImageBase64(canvas.toDataURL('image/jpeg', 0.6));
-                    };
-                    img.src = event.target.result;
-                };
-                reader.readAsDataURL(file);
+            const startRunning = () => {
+                if (!navigator.geolocation) return notify('มือถือไม่รองรับ GPS', 'error');
+                setIsTracking(true); setDistance(0); setElapsedTime(0); lastPosRef.current = null;
+                setGpsStatus({ text: 'กำลังจับพิกัด GPS...', color: 'text-blue-500' });
+
+                timerRef.current = setInterval(() => setElapsedTime(p => p + 1), 1000);
+                watchIdRef.current = navigator.geolocation.watchPosition(
+                    (pos) => {
+                        const acc = pos.coords.accuracy;
+                        setGpsStatus({ text: acc < 20 ? 'GPS สัญญาณดี' : 'GPS สัญญาณอ่อน', color: acc < 20 ? 'text-green-500' : 'text-red-500' });
+                        if (acc > 30) return; // กรองพิกัดที่แกว่งเกินไป
+                        
+                        const cLat = pos.coords.latitude; const cLon = pos.coords.longitude;
+                        if (lastPosRef.current) {
+                            const d = getDistance(lastPosRef.current.lat, lastPosRef.current.lon, cLat, cLon);
+                            if (d > 0.003 && d < 0.05) setDistance(p => p + d); // กรองกันโกง/วาร์ป
+                        }
+                        lastPosRef.current = { lat: cLat, lon: cLon };
+                    },
+                    (err) => setGpsStatus({ text: 'ไม่สามารถระบุพิกัดได้', color: 'text-red-500' }),
+                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+                );
             };
 
-            const handleSubmitPhoto = async () => {
-                if (!selectedImageBase64) return notify('กรุณาแนบรูปภาพ', 'error');
-                if (!user) return notify('ระบบยังไม่พร้อม รอสักครู่', 'error');
+            const stopRunning = async () => {
+                setIsTracking(false); clearInterval(timerRef.current); navigator.geolocation.clearWatch(watchIdRef.current);
+                if (distance < 0.1) {
+                    setDistance(0); setElapsedTime(0);
+                    return notify('ระยะทางน้อยไป ไม่ถูกบันทึก (ต้องเกิน 100 เมตร)', 'error');
+                }
+                submitTask({
+                    type: 'gps', distanceKm: distance, durationSec: elapsedTime,
+                    desc: `วิ่งไป ${distance.toFixed(2)} กม. ใช้เวลา ${formatTime(elapsedTime)} นาที`
+                });
+            };
+
+            const handleUpload1 = async (e) => {
+                if (!e.target.files[0]) return;
+                const base64 = await compressImage(e.target.files[0]);
+                setImgBefore(base64);
+                setTimeBefore(Date.now()); // บันทึกเวลาที่ถ่ายรูปที่ 1
+                setTimeDiff(0);
+                notify('บันทึกรูปก่อนเริ่มแล้ว! ลุยเลย!', 'success');
+            };
+
+            const handleUpload2 = async (e) => {
+                if (!e.target.files[0]) return;
+                const base64 = await compressImage(e.target.files[0]);
+                setImgAfter(base64);
+                const now = Date.now();
+                setTimeAfter(now); // บันทึกเวลาที่ถ่ายรูปที่ 2
+                
+                // คำนวณความต่างของเวลา (วินาที)
+                if (timeBefore) {
+                    const diffSeconds = Math.floor((now - timeBefore) / 1000);
+                    setTimeDiff(diffSeconds);
+                }
+            };
+
+            const submitPhotoTask = () => {
+                if (!imgBefore || !imgAfter) return notify('ต้องส่งรูปให้ครบทั้ง 2 รูปก่อนครับ', 'error');
+                
+                // กันเด็กหัวหมอ ถ่าย 2 รูปติดกันใน 1 วินาที
+                if (timeDiff < 60) return notify('เพิ่งออกกำลังกายไปแปบเดียวเอง! (ต้องทำเกิน 1 นาที)', 'error');
+
+                submitTask({
+                    type: 'photo2', img1: imgBefore, img2: imgAfter, durationSec: timeDiff,
+                    desc: `ใช้เวลาทำกิจกรรมไป ${Math.floor(timeDiff / 60)} นาที`
+                });
+            };
+
+            const submitTask = async (extraData) => {
                 setIsLoading(true);
                 try {
                     await db.collection(TASKS_PATH).add({
-                        studentName: studentName, // ผูกกับชื่อนักเรียน
-                        activity: selectedActivity.title,
-                        points: selectedActivity.points,
-                        imgBase64: selectedImageBase64,
+                        studentName,
+                        activityId: selectedAct.id,
+                        activityTitle: selectedAct.title,
+                        points: selectedAct.points,
                         status: 'pending',
-                        time: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
-                        createdAt: Date.now()
+                        timeStr: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
+                        createdAt: Date.now(),
+                        ...extraData
                     });
-                    notify('ส่งงานสำเร็จ! รอครูอนุมัติ');
-                    setSelectedImageBase64(null);
-                    setSelectedActivity(null);
+                    notify('ส่งข้อมูลสำเร็จ! กรุณารอคุณครูตรวจงาน 🎉');
+                    resetActivity();
                     setActiveTab('home');
-                } catch (error) {
-                    notify('เกิดข้อผิดพลาดในการส่ง', 'error');
-                }
+                } catch (error) { notify('เกิดข้อผิดพลาดในการส่ง กรุณาลองใหม่', 'error'); }
                 setIsLoading(false);
             };
 
-            const handleApprove = async (taskId) => {
-                try {
-                    await db.collection(TASKS_PATH).doc(taskId).update({ status: 'approved' });
-                    notify('อนุมัติเรียบร้อย');
-                } catch (error) { notify('เกิดข้อผิดพลาด', 'error'); }
+            const resetActivity = () => {
+                setSelectedAct(null); setIsTracking(false); setDistance(0); setElapsedTime(0);
+                setImgBefore(null); setImgAfter(null); setTimeBefore(null); setTimeDiff(0);
             };
 
-            const handleReject = async (taskId) => {
-                try {
-                    await db.collection(TASKS_PATH).doc(taskId).update({ status: 'rejected' });
-                    notify('ปฏิเสธหลักฐานแล้ว', 'error');
-                } catch (error) { notify('เกิดข้อผิดพลาด', 'error'); }
+            const actionTask = async (id, status) => {
+                await db.collection(TASKS_PATH).doc(id).update({ status });
+                notify(status === 'approved' ? 'อนุมัติงานและให้คะแนนแล้ว' : 'ปฏิเสธหลักฐานแล้ว');
             };
 
-            if (!isLoggedIn) {
-                return (
-                    <div className="min-h-screen bg-gray-100 flex justify-center items-center p-4">
-                        <div className="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden p-8 text-center border-t-8 border-[#06C755]">
-                            <div className="w-24 h-24 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-6">
-                                <i className="fa-solid fa-heart-pulse text-[#06C755] text-4xl"></i>
+            const myApproved = allTasks.filter(t => t.studentName === studentName && t.status === 'approved');
+            const myPoints = myApproved.reduce((sum, t) => sum + t.points, 0);
+            const pendingTasks = allTasks.filter(t => t.status === 'pending');
+
+            // จัดอันดับคนเก่ง (จากผลรวมคะแนนที่ได้รับอนุมัติแล้ว)
+            const stats = allTasks.filter(t => t.status === 'approved').reduce((acc, t) => {
+                if (!acc[t.studentName]) acc[t.studentName] = { name: t.studentName, pts: 0 };
+                acc[t.studentName].pts += t.points;
+                return acc;
+            }, {});
+            const leaderboard = Object.values(stats).sort((a, b) => b.pts - a.pts).slice(0, 10); // เอาแค่ Top 10
+
+            if (!isLoggedIn) return (
+                <div className="min-h-screen flex items-center justify-center p-4">
+                    <div className="w-full max-w-sm bg-white rounded-3xl shadow-xl p-8 border-t-[10px] border-slate-800">
+                        <div className="text-center mb-8">
+                            <i className="fa-solid fa-heart-pulse text-5xl text-slate-800 mb-3"></i>
+                            <h1 className="text-2xl font-black text-gray-800 tracking-wide">Health Passport</h1>
+                            <p className="text-xs text-gray-400 mt-1 uppercase tracking-widest">Ultimate Edition</p>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
+                                <label className="text-xs font-bold text-gray-500 mb-1 block">ชื่อนักเรียน (เข้าสู่ระบบสะสมแต้ม)</label>
+                                <input type="text" placeholder="ด.ช. / ด.ญ. ..." value={inputName} onChange={e=>setInputName(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none font-medium mb-3"/>
+                                <button onClick={()=>handleLogin('student')} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl shadow-md active:scale-95 transition">เข้าสู่ระบบนักเรียน</button>
                             </div>
-                            <h1 className="text-2xl font-black text-gray-800 mb-2">Health Passport</h1>
-                            <p className="text-gray-500 mb-6 text-sm">ระบบสะสมแต้มออนไลน์</p>
-
-                            {!user ? (
-                                <div className="animate-pulse flex justify-center py-4 text-green-600 font-bold">กำลังเชื่อมต่อระบบ...</div>
-                            ) : (
-                                <div className="space-y-4">
-                                    <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
-                                        <p className="text-sm font-bold text-gray-700 text-left mb-2">สำหรับนักเรียน:</p>
-                                        <input 
-                                            type="text" 
-                                            placeholder="พิมพ์ชื่อจริง หรือชื่อเล่น..." 
-                                            value={inputName} 
-                                            onChange={(e) => setInputName(e.target.value)} 
-                                            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:border-green-500 mb-3 font-bold" 
-                                        />
-                                        <button onClick={() => handleLogin('student')} className="w-full bg-[#06C755] text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                                            <i className="fa-solid fa-user"></i> เข้าสู่ระบบนักเรียน
-                                        </button>
-                                    </div>
-                                    
-                                    <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                                        <p className="text-sm font-bold text-gray-700 text-left mb-2">สำหรับคุณครู (ผู้ตรวจสอบ):</p>
-                                        <input 
-                                            type="password" 
-                                            placeholder="ใส่รหัสผ่านเพื่อตรวจงาน..." 
-                                            value={teacherPassword} 
-                                            onChange={(e) => setTeacherPassword(e.target.value)} 
-                                            className="w-full px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:border-slate-500 mb-3" 
-                                        />
-                                        <button onClick={() => handleLogin('teacher')} className="w-full bg-slate-800 text-white font-bold py-3 rounded-xl flex items-center justify-center gap-2 active:scale-95 transition-transform">
-                                            <i className="fa-solid fa-shield-halved"></i> เข้าสู่ระบบคุณครู
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
+                            <div className="flex gap-2">
+                                <input type="password" placeholder="รหัสครู..." value={teacherPassword} onChange={e=>setTeacherPassword(e.target.value)} className="w-2/3 p-3 rounded-xl border border-gray-200 outline-none text-sm"/>
+                                <button onClick={()=>handleLogin('teacher')} className="w-1/3 bg-slate-800 text-white font-bold rounded-xl text-sm active:scale-95 transition">เข้าตรวจ</button>
+                            </div>
                         </div>
                     </div>
-                );
-            }
-
-            const userLevel = getLevel(myPoints);
+                </div>
+            );
 
             return (
-                <div className="min-h-screen bg-gray-100 flex justify-center items-start p-0 sm:p-4 font-sans sm:items-center">
-                    <div className="w-full max-w-md bg-white sm:rounded-[2rem] shadow-2xl overflow-hidden flex flex-col h-screen sm:h-[850px] sm:max-h-[90vh] relative">
-                        <div className="bg-gradient-to-br from-green-500 to-emerald-700 px-6 pt-10 pb-8 sm:rounded-b-[2rem] shadow-md z-10 relative text-white">
-                            <button onClick={() => setIsLoggedIn(false)} className="absolute top-6 right-6 p-2 bg-white/20 rounded-full hover:bg-white/30 backdrop-blur-sm">
-                                <i className="fa-solid fa-right-from-bracket"></i>
-                            </button>
-                            <div className="flex items-center gap-3 mb-6">
-                                <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-green-600 shadow-inner text-xl">
-                                    <i className={`fa-solid ${role === 'student' ? 'fa-user' : 'fa-shield-halved'}`}></i>
+                <div className="min-h-screen pb-20 relative max-w-md mx-auto bg-slate-50 sm:shadow-2xl sm:min-h-[850px] overflow-hidden">
+                    
+                    {/* Header โค้งมนล้ำๆ */}
+                    <div className="bg-gradient-to-br from-slate-800 to-slate-900 pt-10 pb-6 px-6 rounded-b-[2.5rem] text-white shadow-lg relative z-20">
+                        <button onClick={()=>setIsLoggedIn(false)} className="absolute top-4 right-4 text-white/50 hover:text-white"><i className="fa-solid fa-power-off text-xl"></i></button>
+                        
+                        {role === 'student' ? (
+                            <div className="flex items-center gap-4">
+                                <div className="w-16 h-16 rounded-full border-2 border-blue-400 bg-blue-500/20 flex flex-col items-center justify-center">
+                                    <span className="text-xs text-blue-300">Level</span>
+                                    <span className="font-bold text-lg">{Math.floor(myPoints/100) + 1}</span>
                                 </div>
                                 <div>
-                                    <p className="text-sm font-medium opacity-90">{role === 'student' ? 'นักเรียน' : 'โหมดผู้ตรวจ'}</p>
-                                    <h2 className="text-xl font-bold">{role === 'student' ? studentName : 'คุณครู แอดมิน'}</h2>
+                                    <h2 className="text-xl font-bold truncate max-w-[200px]">{studentName}</h2>
+                                    <p className="text-blue-400 font-medium text-sm flex items-center gap-1">
+                                        <i className="fa-solid fa-star text-yellow-400"></i> มี {myPoints} แต้ม
+                                    </p>
                                 </div>
                             </div>
-                            {role === 'student' && activeTab === 'home' && (
-                                <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/20">
-                                    <div className="flex justify-between items-center mb-1">
-                                        <span className="text-white/80 text-sm font-medium">คะแนนสะสม</span>
-                                        <span className={`flex items-center gap-1 text-xs font-bold px-2 py-1 rounded-full ${userLevel.color}`}>
-                                            <i className="fa-solid fa-award"></i> {userLevel.name}
-                                        </span>
-                                    </div>
-                                    <div className="flex items-baseline gap-1 text-white mb-2">
-                                        <span className="text-5xl font-black">{myPoints}</span><span className="text-lg font-bold opacity-80">แต้ม</span>
-                                    </div>
-                                    <div className="bg-black/20 rounded-full h-2 overflow-hidden">
-                                        <div className="bg-white h-full rounded-full transition-all duration-700" style={{ width: `${Math.min((myPoints / 100) * 100, 100)}%` }}></div>
-                                    </div>
-                                </div>
-                            )}
-                            {role === 'teacher' && (
-                                <div className="text-center py-4 bg-white/10 backdrop-blur-md rounded-2xl border border-white/20">
-                                    <div className="text-5xl font-black mb-1">{pendingTasks.length}</div>
-                                    <p className="text-sm opacity-90">งานรออนุมัติทั้งหมด</p>
-                                </div>
-                            )}
-                        </div>
-
-                        <div className="flex-1 overflow-y-auto bg-slate-50 p-6 -mt-4 pt-8 pb-24">
-                            {role === 'student' && activeTab === 'home' && (
-                                <div>
-                                    <h2 className="text-lg font-bold text-gray-800 mb-4">ภารกิจ 8 ฐานสุขภาพ</h2>
-                                    <div className="grid grid-cols-2 gap-3">
-                                        {ACTIVITIES.map((act) => (
-                                            <button key={act.id} onClick={() => { setSelectedActivity(act); setActiveTab('submit'); }} className="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col items-center text-center hover:border-green-300 transition-colors active:scale-95">
-                                                <div className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 text-xl ${act.color}`}>
-                                                    <i className={`fa-solid ${act.icon}`}></i>
-                                                </div>
-                                                <h3 className="text-sm font-bold text-gray-800 mb-1 leading-tight h-10 flex items-center">{act.title}</h3>
-                                                <div className="mt-2 bg-green-50 text-green-600 text-[11px] font-bold px-3 py-1 rounded-full w-full">+{act.points} แต้ม</div>
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-                            )}
-                            {role === 'student' && activeTab === 'submit' && selectedActivity && (
-                                <div>
-                                    <button onClick={() => { setActiveTab('home'); setSelectedImageBase64(null); }} className="flex items-center text-gray-500 mb-4 font-medium bg-white px-3 py-1.5 rounded-full shadow-sm">
-                                        <i className="fa-solid fa-arrow-left mr-2"></i> ย้อนกลับ
-                                    </button>
-                                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-gray-100 text-center mb-6 relative overflow-hidden">
-                                        <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center mb-3 text-2xl ${selectedActivity.color}`}>
-                                            <i className={`fa-solid ${selectedActivity.icon}`}></i>
-                                        </div>
-                                        <h2 className="text-xl font-bold text-gray-800">{selectedActivity.title}</h2>
-                                        <p className="text-gray-500 text-sm mb-4">{selectedActivity.desc}</p>
-                                        <input type="file" accept="image/*" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
-                                        <div onClick={() => fileInputRef.current.click()} className={`border-2 border-dashed rounded-2xl mb-6 cursor-pointer overflow-hidden transition-all flex flex-col items-center justify-center min-h-[200px] relative ${selectedImageBase64 ? 'border-green-400 p-0' : 'border-gray-300 bg-gray-50 hover:bg-gray-100 p-4'}`}>
-                                            {selectedImageBase64 ? <img src={selectedImageBase64} alt="Preview" className="w-full h-full object-cover absolute inset-0" /> : <><i className="fa-solid fa-camera text-4xl text-gray-400 mb-2"></i><p className="text-sm font-bold text-gray-600">กดเพื่อถ่ายรูป / เลือกรูป</p></>}
-                                        </div>
-                                        <button onClick={handleSubmitPhoto} disabled={isLoading} className={`w-full ${isLoading ? 'bg-gray-400' : 'bg-green-500 hover:bg-green-600'} text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-95 flex justify-center items-center gap-2`}>
-                                            {isLoading ? 'กำลังส่งข้อมูล...' : <><i className="fa-solid fa-circle-check"></i> ส่งหลักฐานขอรับคะแนน</>}
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                            {role === 'student' && activeTab === 'reward' && (
-                                <div>
-                                    <h2 className="text-lg font-bold text-gray-800 mb-4">ประวัติการรับแต้ม (ที่อนุมัติแล้ว)</h2>
-                                    {myApprovedTasks.length === 0 ? (
-                                        <div className="bg-white p-6 rounded-2xl text-center text-gray-500 border border-gray-100">ยังไม่มีประวัติ เริ่มทำกิจกรรมเลย!</div>
-                                    ) : (
-                                        <div className="space-y-3">
-                                            {myApprovedTasks.map((t) => (
-                                                <div key={t.id} className="bg-white p-4 rounded-2xl shadow-sm border border-green-100 flex justify-between items-center">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="bg-green-100 text-green-600 w-8 h-8 flex items-center justify-center rounded-full"><i className="fa-solid fa-circle-check"></i></div>
-                                                        <div>
-                                                            <p className="text-sm font-bold text-gray-800">{t.activity}</p>
-                                                            <p className="text-[10px] text-gray-400 flex items-center gap-1"><i className="fa-solid fa-clock"></i> {t.time}</p>
-                                                        </div>
-                                                    </div>
-                                                    <span className="text-green-600 font-bold bg-green-50 px-2 py-1 rounded-lg text-sm">+{t.points}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                            {role === 'teacher' && (
-                                <div>
-                                    <h2 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-shield-halved text-emerald-600"></i> ตรวจสอบหลักฐาน</h2>
-                                    {pendingTasks.length === 0 ? (
-                                        <div className="bg-white p-10 rounded-3xl shadow-sm border border-gray-100 text-center">
-                                            <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center mx-auto mb-3 text-3xl"><i className="fa-solid fa-circle-check text-green-400"></i></div>
-                                            <h3 className="font-bold text-gray-700">ไม่มีงานค้าง</h3>
-                                        </div>
-                                    ) : (
-                                        <div className="space-y-4">
-                                            {pendingTasks.map(task => (
-                                                <div key={task.id} className="bg-white p-5 rounded-3xl shadow-sm border border-gray-200">
-                                                    <div className="flex justify-between items-start mb-3">
-                                                        <div>
-                                                            <p className="font-bold text-gray-800">{task.studentName}</p>
-                                                            <p className="text-[10px] text-gray-400 mt-1 flex items-center gap-1"><i className="fa-solid fa-clock"></i> {task.time}</p>
-                                                        </div>
-                                                        <span className="bg-emerald-100 text-emerald-700 text-[10px] font-bold px-2 py-1 rounded-md">{task.activity}</span>
-                                                    </div>
-                                                    <div className="bg-gray-100 h-48 rounded-2xl overflow-hidden mb-4 border border-gray-200 relative group">
-                                                        {task.imgBase64 ? <img src={task.imgBase64} alt="Evidence" className="w-full h-full object-contain bg-black" /> : <div className="w-full h-full flex items-center justify-center text-gray-400">ไม่มีรูปภาพ</div>}
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <button onClick={() => handleReject(task.id)} className="flex-1 flex justify-center items-center gap-1 bg-white border-2 border-red-100 text-red-500 font-bold py-3 rounded-xl hover:bg-red-50 active:scale-95 transition-all"><i className="fa-solid fa-circle-xmark"></i> ไม่อนุมัติ</button>
-                                                        <button onClick={() => handleApprove(task.id)} className="flex-[2] flex justify-center items-center gap-1 bg-green-500 text-white font-bold py-3 rounded-xl hover:bg-green-600 active:scale-95 transition-all shadow-md shadow-green-200"><i className="fa-solid fa-circle-check"></i> อนุมัติ +{task.points}</button>
-                                                    </div>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                </div>
-                            )}
-                        </div>
-                        {role === 'student' && (
-                            <div className="absolute bottom-0 w-full bg-white border-t border-gray-100 px-6 py-3 flex justify-around items-center z-20 pb-safe">
-                                <button onClick={() => { setActiveTab('home'); setSelectedActivity(null); }} className={`flex flex-col items-center gap-1 w-16 transition-colors ${activeTab === 'home' || activeTab === 'submit' ? 'text-green-600' : 'text-gray-400'}`}>
-                                    <div className={`p-2 rounded-xl text-xl transition-colors ${activeTab === 'home' || activeTab === 'submit' ? 'bg-green-50' : ''}`}><i className="fa-solid fa-shoe-prints"></i></div>
-                                    <span className="text-[10px] font-bold">กิจกรรม</span>
-                                </button>
-                                <button onClick={() => setActiveTab('reward')} className={`flex flex-col items-center gap-1 w-16 transition-colors ${activeTab === 'reward' ? 'text-green-600' : 'text-gray-400'}`}>
-                                    <div className={`p-2 rounded-xl text-xl transition-colors ${activeTab === 'reward' ? 'bg-green-50' : ''}`}><i className="fa-solid fa-trophy"></i></div>
-                                    <span className="text-[10px] font-bold">ประวัติแต้ม</span>
-                                </button>
-                            </div>
-                        )}
-                        {showNotification.show && (
-                            <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-50">
-                                <div className={`${showNotification.type === 'error' ? 'bg-red-500' : 'bg-slate-800'} text-white px-4 py-3 rounded-2xl shadow-xl text-sm font-bold flex items-center gap-2 w-max`}>
-                                    <i className={`fa-solid ${showNotification.type === 'error' ? 'fa-circle-xmark' : 'fa-circle-check'}`}></i>
-                                    {showNotification.msg}
-                                </div>
+                        ) : (
+                            <div className="text-center mt-2">
+                                <h2 className="text-xl font-bold">โหมดครูผู้ตรวจ</h2>
+                                <p className="text-blue-400 text-sm mt-1">{pendingTasks.length} งานรอตรวจสอบ</p>
                             </div>
                         )}
                     </div>
+
+                    <div className="px-5 pt-6 pb-24 h-[calc(100vh-180px)] sm:h-[650px] overflow-y-auto bg-slate-50 relative z-10 -mt-5">
+                        
+                        {/* หน้าแรก: เลือก 4 ฐาน */}
+                        {role === 'student' && activeTab === 'home' && (
+                            <div className="animate-in fade-in">
+                                <h3 className="font-bold text-gray-700 mb-4">เลือกกิจกรรม 4 ฐาน</h3>
+                                <div className="grid grid-cols-2 gap-4">
+                                    {ACTIVITIES.map(act => (
+                                        <div key={act.id} onClick={() => { setSelectedAct(act); setActiveTab('activity'); }} 
+                                             className={`bg-white rounded-3xl p-5 shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-all flex flex-col items-center text-center hover:${act.shadow}`}>
+                                            <div className={`w-14 h-14 rounded-full flex items-center justify-center text-2xl text-white bg-gradient-to-br ${act.color} mb-3 shadow-md`}>
+                                                <i className={`fa-solid ${act.icon}`}></i>
+                                            </div>
+                                            <h4 className="font-bold text-gray-800 text-sm leading-tight h-10 flex items-center">{act.title}</h4>
+                                            <span className={`text-[10px] font-bold px-3 py-1 rounded-full bg-slate-100 text-slate-600 mt-1`}>+{act.points} แต้ม</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* หน้ากิจกรรม (วิ่ง หรือ ถ่ายรูป) */}
+                        {role === 'student' && activeTab === 'activity' && selectedAct && (
+                            <div className="animate-in slide-in-from-right-4">
+                                <button onClick={resetActivity} className="text-sm font-bold text-gray-500 mb-4 bg-white px-4 py-2 rounded-full shadow-sm hover:bg-gray-50"><i className="fa-solid fa-arrow-left mr-1"></i> ย้อนกลับ</button>
+                                
+                                <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-gray-100 text-center relative overflow-hidden">
+                                    <div className="absolute top-0 right-0 bg-yellow-400 text-yellow-900 text-xs font-bold px-4 py-1 rounded-bl-xl shadow-sm">รางวัล {selectedAct.points} แต้ม</div>
+                                    
+                                    <div className={`w-16 h-16 mx-auto rounded-full flex items-center justify-center text-3xl text-white bg-gradient-to-br ${selectedAct.color} mb-4 shadow-md`}>
+                                        <i className={`fa-solid ${selectedAct.icon}`}></i>
+                                    </div>
+                                    <h2 className="text-xl font-bold text-gray-800 mb-6">{selectedAct.title}</h2>
+
+                                    {/* 1. ระบบจับวิ่งด้วย GPS */}
+                                    {selectedAct.type === 'gps' && (
+                                        <div className="flex flex-col items-center">
+                                            <div className={`w-48 h-48 rounded-full border-[10px] flex flex-col items-center justify-center mb-6 transition-all duration-300 ${isTracking ? 'border-blue-400 pulse-ring bg-blue-50' : 'border-slate-100 bg-white'}`}>
+                                                <span className="text-4xl font-black text-slate-800">{distance.toFixed(2)}</span>
+                                                <span className="text-xs font-bold text-slate-400 uppercase">กิโลเมตร</span>
+                                                <span className="text-lg font-mono text-blue-500 mt-1">{formatTime(elapsedTime)}</span>
+                                            </div>
+                                            {isTracking && <p className={`text-xs font-bold mb-4 ${gpsStatus.color}`}><i className="fa-solid fa-satellite-dish"></i> {gpsStatus.text}</p>}
+                                            
+                                            {!isTracking ? (
+                                                <button onClick={startRunning} className="w-full bg-slate-800 text-white font-bold py-4 rounded-2xl active:scale-95 shadow-md">เริ่มวิ่งจับระยะทาง</button>
+                                            ) : (
+                                                <button onClick={stopRunning} disabled={isLoading} className="w-full bg-red-500 text-white font-bold py-4 rounded-2xl active:scale-95 shadow-lg shadow-red-200">
+                                                    {isLoading ? 'กำลังบันทึก...' : 'จบการวิ่ง และส่งผล'}
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* 2. ระบบถ่ายรูป Before & After อัจฉริยะ */}
+                                    {selectedAct.type === 'photo2' && (
+                                        <div className="space-y-4">
+                                            <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef1} onChange={handleUpload1} />
+                                            <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef2} onChange={handleUpload2} />
+                                            
+                                            {/* ช่องถ่ายรูปที่ 1 (ก่อน) */}
+                                            <div onClick={()=> !imgBefore && fileInputRef1.current.click()} 
+                                                 className={`upload-box relative border-2 border-dashed rounded-2xl p-4 flex flex-col items-center justify-center h-32 overflow-hidden
+                                                 ${imgBefore ? 'completed border-green-400' : 'active border-blue-400 bg-blue-50'}`}>
+                                                {imgBefore ? (
+                                                    <>
+                                                        <img src={imgBefore} className="absolute inset-0 w-full h-full object-cover opacity-60"/>
+                                                        <div className="relative z-10 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md"><i className="fa-solid fa-check"></i> รูปก่อนเริ่ม <br/><span className="text-[10px] font-mono">{new Date(timeBefore).toLocaleTimeString('th-TH')}</span></div>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <div className="bg-blue-100 text-blue-500 w-10 h-10 rounded-full flex items-center justify-center text-xl mb-2 font-black">1</div>
+                                                        <p className="text-sm font-bold text-blue-700">ถ่ายรูป "ก่อน" เริ่มกิจกรรม</p>
+                                                    </>
+                                                )}
+                                            </div>
+
+                                            {/* ช่องถ่ายรูปที่ 2 (หลัง) */}
+                                            <div onClick={()=> imgBefore && !imgAfter && fileInputRef2.current.click()} 
+                                                 className={`upload-box relative border-2 border-dashed rounded-2xl p-4 flex flex-col items-center justify-center h-32 overflow-hidden
+                                                 ${!imgBefore ? 'disabled' : imgAfter ? 'completed border-green-400' : 'active border-orange-400 bg-orange-50'}`}>
+                                                {imgAfter ? (
+                                                    <>
+                                                        <img src={imgAfter} className="absolute inset-0 w-full h-full object-cover opacity-60"/>
+                                                        <div className="relative z-10 bg-green-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-md"><i className="fa-solid fa-check"></i> รูปหลังทำเสร็จ <br/><span className="text-[10px] font-mono">{new Date(timeAfter).toLocaleTimeString('th-TH')}</span></div>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xl mb-2 font-black ${imgBefore ? 'bg-orange-100 text-orange-500' : 'bg-gray-200 text-gray-400'}`}>2</div>
+                                                        <p className={`text-sm font-bold ${imgBefore ? 'text-orange-700' : 'text-gray-400'}`}>{imgBefore ? 'ออกกำลังกายเสร็จแล้ว! ถ่ายรูปเลย' : 'ต้องถ่ายรูปที่ 1 ก่อน'}</p>
+                                                    </>
+                                                )}
+                                            </div>
+                                            
+                                            {/* สรุปเวลา (โชว์เฉพาะตอนถ่ายรูปครบ 2 รูปแล้ว) */}
+                                            {imgBefore && imgAfter && (
+                                                 <div className="bg-emerald-50 py-3 rounded-xl border border-emerald-100 text-center animate-in zoom-in duration-300">
+                                                     <p className="text-xs font-bold text-emerald-600 mb-1">สรุปเวลาที่คุณใช้ทำกิจกรรมไป</p>
+                                                     <p className="text-2xl font-black text-emerald-500">{Math.floor(timeDiff/60)} <span className="text-sm font-medium">นาที</span></p>
+                                                 </div>
+                                            )}
+
+                                            {/* ปุ่มส่งงาน */}
+                                            {imgBefore && imgAfter && (
+                                                <button onClick={submitPhotoTask} disabled={isLoading} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition-all animate-in slide-in-from-bottom-4">
+                                                    {isLoading ? 'กำลังบันทึกข้อมูล...' : <><i className="fa-solid fa-paper-plane mr-2"></i> ส่งให้คุณครูตรวจ</>}
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* หน้า Leaderboard */}
+                        {activeTab === 'leaderboard' && (
+                            <div className="animate-in fade-in">
+                                <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-trophy text-yellow-500"></i> ทำเนียบคนเก่ง (Top 10)</h2>
+                                {leaderboard.length === 0 ? (
+                                    <div className="text-center text-gray-400 bg-white p-8 rounded-3xl border border-gray-100">ยังไม่มีข้อมูลนักเรียนที่ได้คะแนน</div>
+                                ) : (
+                                    <div className="space-y-3">
+                                        {leaderboard.map((u, i) => (
+                                            <div key={u.name} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
+                                                <div className="flex items-center gap-4">
+                                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${i===0?'bg-yellow-100 text-yellow-600':i===1?'bg-slate-200 text-slate-600':i===2?'bg-orange-100 text-orange-600':'bg-gray-50 text-gray-400'}`}>{i+1}</div>
+                                                    <span className="font-bold text-slate-700">{u.name}</span>
+                                                </div>
+                                                <span className="font-black text-blue-500 text-lg">{u.pts} <span className="text-xs text-blue-300">แต้ม</span></span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* หน้าครู: ตรวจงาน */}
+                        {role === 'teacher' && activeTab === 'review' && (
+                            <div className="animate-in fade-in">
+                                {pendingTasks.length === 0 ? (
+                                    <div className="text-center bg-white p-10 rounded-3xl border border-dashed border-gray-300 text-gray-400">
+                                        <i className="fa-solid fa-mug-hot text-4xl mb-3"></i><p>ตรวจงานหมดแล้ว พักผ่อนได้เลยครับคุณครู!</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {pendingTasks.map(t => (
+                                            <div key={t.id} className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200">
+                                                <div className="flex justify-between items-start mb-4">
+                                                    <div>
+                                                        <h4 className="font-bold text-slate-800 text-lg">{t.studentName}</h4>
+                                                        <p className="text-xs text-slate-500"><i className="fa-regular fa-clock"></i> ส่งเมื่อ {t.timeStr}</p>
+                                                    </div>
+                                                    <span className="bg-blue-50 text-blue-600 text-xs font-bold px-3 py-1 rounded-full">{t.activityTitle}</span>
+                                                </div>
+
+                                                {/* ครูเห็นหลักฐาน 2 แบบ */}
+                                                {t.type === 'gps' ? (
+                                                    <div className="bg-slate-50 rounded-2xl p-4 text-center border border-slate-100 mb-4">
+                                                        <i className="fa-solid fa-route text-3xl text-blue-300 mb-2"></i>
+                                                        <p className="font-bold text-slate-700 text-lg">ระยะทาง: {t.distanceKm.toFixed(2)} กม.</p>
+                                                        <p className="text-sm text-slate-500">ใช้เวลา: {formatTime(t.durationSec)} นาที</p>
+                                                    </div>
+                                                ) : (
+                                                    <div>
+                                                        <div className="flex gap-2 mb-3">
+                                                            <div className="flex-1 relative rounded-xl overflow-hidden aspect-square bg-slate-100 border border-gray-200">
+                                                                <img src={t.img1} className="w-full h-full object-cover" />
+                                                                <div className="absolute top-1 left-1 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-md">1. ก่อนเริ่ม</div>
+                                                            </div>
+                                                            <div className="flex-1 relative rounded-xl overflow-hidden aspect-square bg-slate-100 border border-gray-200">
+                                                                <img src={t.img2} className="w-full h-full object-cover" />
+                                                                <div className="absolute top-1 left-1 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-md">2. หลังเสร็จ</div>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-center text-sm font-bold text-emerald-600 bg-emerald-50 py-2 rounded-xl mb-4 border border-emerald-100">
+                                                            <i className="fa-solid fa-stopwatch"></i> {t.desc}
+                                                        </div>
+                                                    </div>
+                                                )}
+
+                                                <div className="flex gap-2">
+                                                    <button onClick={()=>actionTask(t.id, 'rejected')} className="flex-1 py-3 text-red-500 font-bold bg-red-50 hover:bg-red-100 rounded-xl transition text-sm"><i className="fa-solid fa-xmark"></i> ปฏิเสธ</button>
+                                                    <button onClick={()=>actionTask(t.id, 'approved')} className="flex-[2] py-3 text-white font-bold bg-slate-800 hover:bg-slate-900 rounded-xl shadow-md transition text-sm"><i className="fa-solid fa-check"></i> อนุมัติให้ {t.points} แต้ม</button>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Navbar ด้านล่าง */}
+                    <div className="absolute bottom-0 w-full glass-panel border-t border-gray-200 px-6 py-4 flex justify-around items-center z-30 pb-safe">
+                        {role === 'student' ? (
+                            <>
+                                <button onClick={() => { setActiveTab('home'); resetActivity(); }} className={`flex flex-col items-center gap-1 ${activeTab==='home'||activeTab==='activity' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}>
+                                    <i className="fa-solid fa-house text-xl"></i><span className="text-[10px] font-bold">หน้าแรก</span>
+                                </button>
+                                <button onClick={() => setActiveTab('leaderboard')} className={`flex flex-col items-center gap-1 ${activeTab==='leaderboard' ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}>
+                                    <i className="fa-solid fa-chart-simple text-xl"></i><span className="text-[10px] font-bold">อันดับโรงเรียน</span>
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <button onClick={() => setActiveTab('review')} className={`flex flex-col items-center gap-1 ${activeTab==='review' ? 'text-slate-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                                    <i className="fa-solid fa-clipboard-check text-xl"></i><span className="text-[10px] font-bold">ตรวจงาน ({pendingTasks.length})</span>
+                                </button>
+                                <button onClick={() => setActiveTab('leaderboard')} className={`flex flex-col items-center gap-1 ${activeTab==='leaderboard' ? 'text-slate-800' : 'text-gray-400 hover:text-gray-600'}`}>
+                                    <i className="fa-solid fa-chart-simple text-xl"></i><span className="text-[10px] font-bold">อันดับคะแนน</span>
+                                </button>
+                            </>
+                        )}
+                    </div>
+
+                    {/* แจ้งเตือน Toast */}
+                    {showNotif.show && (
+                        <div className="absolute top-8 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4">
+                            <div className={`${showNotif.type==='error'?'bg-red-500':'bg-slate-800'} text-white px-5 py-3 rounded-full shadow-2xl text-sm font-bold flex items-center gap-2 w-max border-2 border-white/20`}>
+                                <i className={`fa-solid ${showNotif.type==='error'?'fa-circle-xmark':'fa-circle-check'}`}></i> {showNotif.msg}
+                            </div>
+                        </div>
+                    )}
                 </div>
             );
         }
@@ -395,5 +550,3 @@
     </script>
 </body>
 </html>
-
-
