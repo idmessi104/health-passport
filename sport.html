@@ -229,6 +229,7 @@ function App(){
   const [selectedAct,setSelectedAct]=useState(null);
 
   const [isTracking,setIsTracking]=useState(false);
+  const [isPaused, setIsPaused] = useState(false); // [ใหม่] เช็คว่าหยุดพักชั่วคราวอยู่หรือไม่
   const [distance,setDistance]=useState(0);
   const [elapsedTime,setElapsedTime]=useState(0);
   const [movingTime,setMovingTime]=useState(0);
@@ -287,7 +288,7 @@ function App(){
   useEffect(()=>()=>stopWatchers(),[stopWatchers]);
 
   const resetActivity=useCallback(()=>{
-    stopWatchers(); setSelectedAct(null); setIsTracking(false);
+    stopWatchers(); setSelectedAct(null); setIsTracking(false); setIsPaused(false);
     setDistance(0); setElapsedTime(0); setMovingTime(0); setGpsAcc(null); setGpsState('idle');
     setImgBefore(null); setImgAfter(null); setTimeBefore(null); setTimeAfter(null);
     setBusy(false); setActiveTab('home');
@@ -323,7 +324,7 @@ function App(){
   const backRef=useRef(()=>{});
   backRef.current=()=>{
     if(preview){ setPreview(null); window.history.pushState({hp:true},''); return; }
-    if(isTracking && !window.confirm('กำลังจับเวลาอยู่ ยืนยันที่จะออกหรือไม่?')){ window.history.pushState({hp:true,tab:activeTab},''); return; }
+    if((isTracking || (distance > 0 && elapsedTime > 0 && !isTracking)) && !window.confirm('กิจกรรมวิ่งยังไม่ถูกส่ง ยืนยันที่จะออกหรือไม่?')){ window.history.pushState({hp:true,tab:activeTab},''); return; }
     if(activeTab==='activity') resetActivity();
     else if(activeTab!=='home') setActiveTab(user?.role==='teacher'?'review':'home');
     else window.history.pushState({hp:true,tab:'home'},'');
@@ -452,15 +453,39 @@ function App(){
     setGpsState('moving');
   },[]);
 
+  // เริ่มวิ่ง หรือ วิ่งต่อ
   const startRunning=()=>{
     if(!navigator.geolocation) return showToast('อุปกรณ์ไม่รองรับ GPS','error');
-    setDistance(0); setElapsedTime(0); setMovingTime(0); setGpsState('warmup');
-    lastPos.current=null; warmup.current=0; streak.current=0; pending.current=0; movingAt.current=0; setIsTracking(true);
-    timerRef.current=setInterval(()=>{ setElapsedTime(t=>t+1); if(Date.now()-movingAt.current<6000) setMovingTime(t=>t+1); },1000);
+    // หากเริ่มใหม่จาก 0 ให้เคลียร์ค่าทั้งหมด
+    if (!isPaused && distance === 0) {
+      setDistance(0); setElapsedTime(0); setMovingTime(0); 
+    }
+    setGpsState('warmup');
+    lastPos.current=null; warmup.current=0; streak.current=0; pending.current=0; movingAt.current=0; 
+    setIsTracking(true);
+    setIsPaused(false);
+    
+    if(!timerRef.current) {
+      timerRef.current=setInterval(()=>{ setElapsedTime(t=>t+1); if(Date.now()-movingAt.current<6000) setMovingTime(t=>t+1); },1000);
+    }
     watchRef.current=navigator.geolocation.watchPosition(onPosition,err=>showToast('GPS: '+err.message,'error'),{enableHighAccuracy:true,maximumAge:0,timeout:10000});
     showToast('กำลังจับสัญญาณ GPS...');
   };
-  const stopRunning=()=>{ stopWatchers(); setIsTracking(false); setGpsState('idle'); };
+  
+  // พักเบรก
+  const pauseRunning=()=>{
+     if(watchRef.current!==null){ navigator.geolocation.clearWatch(watchRef.current); watchRef.current=null; }
+     if(timerRef.current){ clearInterval(timerRef.current); timerRef.current=null; }
+     setIsTracking(false);
+     setIsPaused(true);
+     setGpsState('idle');
+  };
+
+  // เลิกวิ่ง (เตรียมส่ง)
+  const stopRunning=()=>{ 
+     pauseRunning();
+     setIsPaused(false); // ถือว่าจบบริบูรณ์
+  };
 
   const handleUpload=async(e,slot)=>{
     const f=e.target.files?.[0]; if(!f) return;
@@ -481,16 +506,12 @@ function App(){
     finally{ setBusy(false); e.target.value=''; }
   };
   
-  // อัปเดต: ให้สามารถใช้ function นี้ทั้งรูป 1 และ รูป 2 ได้อย่างสมบูรณ์
   const deletePhoto = useCallback((slot) => {
     if(!window.confirm(`ต้องการลบรูปภาพใช่หรือไม่?`)) return;
-    
     if (slot === 1) {
        setImgBefore(null); setTimeBefore(null);
        if (selectedAct && user) localStorage.removeItem(`hp_draft_${user.name}_${selectedAct.id}`);
-    } else {
-       setImgAfter(null); setTimeAfter(null);
-    }
+    } else { setImgAfter(null); setTimeAfter(null); }
   }, [selectedAct, user]);
 
   const myTasks=useMemo(()=>tasks.filter(t=>t.studentName===user?.name).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)),[tasks,user]);
@@ -788,14 +809,47 @@ function App(){
                   <MiniStat icon="fa-stopwatch" value={fmtTime(elapsedTime)} label="เวลาทั้งหมด" tone="text-ink-900"/>
                   <MiniStat icon="fa-shoe-prints" value={fmtTime(movingTime)} label="เวลาที่เคลื่อนที่" tone="text-brand-600"/>
                 </div>
-                {isTracking && (
-                  <div className={`mt-3 flex items-center justify-center gap-2 text-xs font-semibold ${gpsInfo[0]} ${gpsInfo[1]} rounded-2xl py-2.5`}>
-                    <i className={`fas ${gpsInfo[2]}`}></i>{gpsInfo[3]} {gpsAcc!==null&&gpsState!=='weak' && <span className="text-ink-400 font-normal">±{gpsAcc} ม.</span>}
+                
+                {/* แสดงสถานะ GPS */}
+                {(isTracking || isPaused) && (
+                  <div className={`mt-3 flex items-center justify-center gap-2 text-xs font-semibold ${isPaused ? 'text-amber-600 bg-amber-50' : gpsInfo[0]} ${isPaused ? '' : gpsInfo[1]} rounded-2xl py-2.5`}>
+                    <i className={`fas ${isPaused ? 'fa-pause' : gpsInfo[2]}`}></i>
+                    {isPaused ? 'พักเบรกชั่วคราว' : gpsInfo[3]} 
+                    {gpsAcc!==null&&gpsState!=='weak'&&!isPaused && <span className="text-ink-400 font-normal">±{gpsAcc} ม.</span>}
                   </div>
                 )}
-                <button onClick={isTracking?stopRunning:startRunning} className={`w-full h-14 mt-4 rounded-2xl font-bold text-white shadow-lift press ${isTracking?'bg-rose-500':'bg-brand-600'}`}>
-                  <i className={`fas ${isTracking?'fa-stop':'fa-play'} mr-2 text-sm`}></i>{isTracking?'หยุดจับเวลา':'เริ่มวิ่ง'}
-                </button>
+                
+                {/* กลุ่มปุ่มควบคุมการวิ่ง */}
+                <div className="mt-5 space-y-2">
+                    {!isTracking && !isPaused && distance === 0 && (
+                        <button onClick={startRunning} className="w-full h-14 rounded-2xl font-bold text-white bg-brand-600 shadow-lift press">
+                          <i className="fas fa-play mr-2 text-sm"></i>เริ่มวิ่ง
+                        </button>
+                    )}
+
+                    {isTracking && !isPaused && (
+                        <div className="grid grid-cols-2 gap-2">
+                           <button onClick={pauseRunning} className="h-14 rounded-2xl font-bold text-amber-700 bg-amber-100 shadow-sm press">
+                              <i className="fas fa-pause mr-2 text-sm"></i>พักเบรก
+                           </button>
+                           <button onClick={stopRunning} className="h-14 rounded-2xl font-bold text-white bg-rose-500 shadow-lift press">
+                              <i className="fas fa-stop mr-2 text-sm"></i>จบกิจกรรม
+                           </button>
+                        </div>
+                    )}
+
+                    {isPaused && !isTracking && distance > 0 && (
+                         <div className="grid grid-cols-2 gap-2">
+                           <button onClick={startRunning} className="h-14 rounded-2xl font-bold text-white bg-brand-500 shadow-lift press">
+                              <i className="fas fa-play mr-2 text-sm"></i>วิ่งต่อ
+                           </button>
+                           <button onClick={stopRunning} className="h-14 rounded-2xl font-bold text-white bg-rose-500 shadow-lift press">
+                              <i className="fas fa-stop mr-2 text-sm"></i>จบกิจกรรม
+                           </button>
+                        </div>
+                    )}
+                </div>
+
               </div>
             ) : (
               <div className="bg-white rounded-3xl shadow-card p-5">
@@ -814,9 +868,14 @@ function App(){
                 </div>
               </div>
             )}
-            <button onClick={submitTask} disabled={busy} className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold shadow-lift press disabled:opacity-50">
-              {busy?<><i className="fas fa-spinner fa-spin mr-2"></i>กำลังส่ง...</>:<><i className="fas fa-paper-plane mr-2 text-sm"></i>ส่งให้ครูตรวจ</>}
-            </button>
+
+            {/* ปุ่มส่งให้ครู จะไม่ปรากฏเวลาที่กำลังวิ่งอยู่ */}
+            {(!isTracking || selectedAct.type !== 'gps') && (!isPaused || selectedAct.type !== 'gps') && (
+                <button onClick={submitTask} disabled={busy} className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold shadow-lift press disabled:opacity-50 mt-4">
+                  {busy?<><i className="fas fa-spinner fa-spin mr-2"></i>กำลังส่ง...</>:<><i className="fas fa-paper-plane mr-2 text-sm"></i>ส่งให้ครูตรวจ</>}
+                </button>
+            )}
+            
           </div>
         )}
 
@@ -1036,7 +1095,6 @@ const SkeletonList=()=><div className="space-y-2 mt-3">{[0,1,2].map(i=><div key=
 const EmptyInline=({text})=><div className="py-12 text-center"><i className="fas fa-inbox text-3xl text-ink-400/40"></i><p className="text-sm text-ink-400 mt-2">{text}</p></div>;
 const EmptyCard=({icon,text,tone='text-ink-400/40'})=><div className="bg-white rounded-3xl shadow-card p-12 text-center fade-up"><i className={`fas ${icon} text-5xl ${tone}`}></i><p className="text-ink-500 mt-3 font-medium">{text}</p></div>;
 
-// [อัปเดต]: จัดการ Event Propagation ไม่ให้การกดถังขยะไปทริกเกอร์การขยายรูป
 function PhotoSlot({label,step,img,time,onPick,onView,onDelete,disabled,hint}){
   const id='f_'+step;
   return (
