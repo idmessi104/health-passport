@@ -96,15 +96,14 @@ const USERS_PATH = 'artifacts/health-passport-v5/public/data/users';
 const TEACHER_PASSWORD = '191919';
 const LS_KEY = 'hp_user_v5';
 
-// [อัปเดต]: ปรับตั้งค่า GPS ใหม่ ให้ไวขึ้น ระยะขึ้นง่ายขึ้น แต่ยังกันนั่งนิ่งๆ ได้
 const GPS = {
-  maxAccuracy: 35,    // อนุโลมให้สัญญาณแกว่งได้มากขึ้น (เดิม 25)
-  warmupFixes: 1,     // ลดเวลาอุ่นเครื่อง GPS (เดิม 3)
-  minMove: 3,         // ขยับแค่ 3 เมตรก็นับแล้ว (เดิม 8)
-  noiseFactor: 0.8,   // ลดตัวคูณการกรองสัญญาณรบกวน (เดิม 1.2)
-  minSpeed: 0.3,      // ลดความเร็วขั้นต่ำ (ประมาณเดินช้าๆ ก็นับ) (เดิม 0.6)
-  maxSpeed: 8,        // ไม่เกิน 28 กม./ชม. (กันนั่งมอเตอร์ไซค์)
-  moveStreak: 1,      // นับสะสมทันที ไม่ต้องรอให้เดินต่อเนื่อง (เดิม 2)
+  maxAccuracy: 35,    
+  warmupFixes: 1,     
+  minMove: 3,         
+  noiseFactor: 0.8,   
+  minSpeed: 0.3,      
+  maxSpeed: 8,        
+  moveStreak: 1,      
 };
 
 let db=null, auth=null, initError=null;
@@ -406,7 +405,6 @@ function App(){
     setBusy(false);
   };
 
-  // [อัปเดต]: ฟังก์ชันจัดการสัญญาณ GPS ที่ปรับจูนใหม่ให้จับระยะง่ายขึ้น
   const onPosition=useCallback(pos=>{
     const {latitude:lat,longitude:lng,accuracy:acc,speed:devSpeed}=pos.coords; const t=pos.timestamp||Date.now();
     setGpsAcc(Math.round(acc));
@@ -425,8 +423,6 @@ function App(){
     if(dt<1) return;
     
     const d=getDistanceM(prev.lat,prev.lng,lat,lng);
-    
-    // คำนวณ Floor (เกณฑ์ขยับขั้นต่ำ) โดยใช้ NoiseFactor ที่ลดลง
     const floor=Math.max(GPS.minMove,((acc+prev.acc)/2)*GPS.noiseFactor);
     
     if(d<floor){ 
@@ -461,7 +457,6 @@ function App(){
     setDistance(0); setElapsedTime(0); setMovingTime(0); setGpsState('warmup');
     lastPos.current=null; warmup.current=0; streak.current=0; pending.current=0; movingAt.current=0; setIsTracking(true);
     timerRef.current=setInterval(()=>{ setElapsedTime(t=>t+1); if(Date.now()-movingAt.current<6000) setMovingTime(t=>t+1); },1000);
-    // อัปเดต options ของ GPS ให้ดึงข้อมูลบ่อยขึ้นและใช้พลังงานสูงสุด
     watchRef.current=navigator.geolocation.watchPosition(onPosition,err=>showToast('GPS: '+err.message,'error'),{enableHighAccuracy:true,maximumAge:0,timeout:10000});
     showToast('กำลังจับสัญญาณ GPS...');
   };
@@ -486,10 +481,16 @@ function App(){
     finally{ setBusy(false); e.target.value=''; }
   };
   
-  const deleteBeforePhoto = useCallback(() => {
-    if(!window.confirm('ต้องการลบรูปก่อนเริ่มใช่หรือไม่?')) return;
-    setImgBefore(null); setTimeBefore(null);
-    if (selectedAct && user) localStorage.removeItem(`hp_draft_${user.name}_${selectedAct.id}`);
+  // อัปเดต: ให้สามารถใช้ function นี้ทั้งรูป 1 และ รูป 2 ได้อย่างสมบูรณ์
+  const deletePhoto = useCallback((slot) => {
+    if(!window.confirm(`ต้องการลบรูปภาพใช่หรือไม่?`)) return;
+    
+    if (slot === 1) {
+       setImgBefore(null); setTimeBefore(null);
+       if (selectedAct && user) localStorage.removeItem(`hp_draft_${user.name}_${selectedAct.id}`);
+    } else {
+       setImgAfter(null); setTimeAfter(null);
+    }
   }, [selectedAct, user]);
 
   const myTasks=useMemo(()=>tasks.filter(t=>t.studentName===user?.name).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)),[tasks,user]);
@@ -799,8 +800,8 @@ function App(){
             ) : (
               <div className="bg-white rounded-3xl shadow-card p-5">
                 <div className="grid grid-cols-2 gap-3">
-                  <PhotoSlot label="ก่อนเริ่ม" step="1" img={imgBefore} time={timeBefore} onPick={e=>handleUpload(e,1)} onView={setPreview} onDelete={deleteBeforePhoto} disabled={busy}/>
-                  <PhotoSlot label="หลังเสร็จ" step="2" img={imgAfter} time={timeAfter} onPick={e=>handleUpload(e,2)} onView={setPreview} disabled={busy||!imgBefore} hint={!imgBefore?'ถ่ายรูปแรกก่อน':null}/>
+                  <PhotoSlot label="ก่อนเริ่ม" step="1" img={imgBefore} time={timeBefore} onPick={e=>handleUpload(e,1)} onView={setPreview} onDelete={()=>deletePhoto(1)} disabled={busy}/>
+                  <PhotoSlot label="หลังเสร็จ" step="2" img={imgAfter} time={timeAfter} onPick={e=>handleUpload(e,2)} onView={setPreview} onDelete={()=>deletePhoto(2)} disabled={busy||!imgBefore} hint={!imgBefore?'ถ่ายรูปแรกก่อน':null}/>
                 </div>
                 <div className="mt-4">
                   <div className="flex justify-between text-xs mb-2">
@@ -1035,6 +1036,7 @@ const SkeletonList=()=><div className="space-y-2 mt-3">{[0,1,2].map(i=><div key=
 const EmptyInline=({text})=><div className="py-12 text-center"><i className="fas fa-inbox text-3xl text-ink-400/40"></i><p className="text-sm text-ink-400 mt-2">{text}</p></div>;
 const EmptyCard=({icon,text,tone='text-ink-400/40'})=><div className="bg-white rounded-3xl shadow-card p-12 text-center fade-up"><i className={`fas ${icon} text-5xl ${tone}`}></i><p className="text-ink-500 mt-3 font-medium">{text}</p></div>;
 
+// [อัปเดต]: จัดการ Event Propagation ไม่ให้การกดถังขยะไปทริกเกอร์การขยายรูป
 function PhotoSlot({label,step,img,time,onPick,onView,onDelete,disabled,hint}){
   const id='f_'+step;
   return (
@@ -1049,7 +1051,13 @@ function PhotoSlot({label,step,img,time,onPick,onView,onDelete,disabled,hint}){
             <span className="absolute bottom-2 left-2 bg-black/65 text-white text-[9px] px-2 py-1 rounded-lg backdrop-blur-sm"><i className="fas fa-clock mr-1"></i>{fmtDT(time)}</span>
           </div>
           {onDelete && !disabled && (
-            <button onClick={(e)=>{ e.stopPropagation(); onDelete(); }} className="absolute -top-2 -right-2 w-7 h-7 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-md press">
+            <button 
+              onClick={(e)=>{ 
+                e.preventDefault(); 
+                e.stopPropagation(); 
+                onDelete(); 
+              }} 
+              className="absolute -top-2 -right-2 w-7 h-7 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-md press z-20 cursor-pointer">
               <i className="fas fa-trash-alt text-[10px]"></i>
             </button>
           )}
