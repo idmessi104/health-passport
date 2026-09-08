@@ -1,540 +1,1070 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Health Passport</title>
-    
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore-compat.js"></script>
-    
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    
-    <style>
-        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; background-color: #f8fafc; }
-        .pb-safe { padding-bottom: calc(env(safe-area-inset-bottom) + 15px); }
-        .pulse-ring { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
-        /* ตกแต่งกล่องถ่ายรูป */
-        .upload-box { transition: all 0.2s; }
-        .upload-box.active { border-color: #10b981; background-color: #ecfdf5; cursor: pointer; }
-        .upload-box.disabled { border-color: #e2e8f0; background-color: #f8fafc; opacity: 0.6; cursor: not-allowed; }
-        .upload-box.completed { border-color: #10b981; background-color: #fff; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#10b981">
+<title>Health Passport | สมุดสุขภาพนักเรียน</title>
+
+<meta property="og:title" content="Health Passport">
+<meta property="og:description" content="สมุดบันทึกสุขภาพนักเรียน — บันทึกกิจกรรม สะสมคะแนน">
+<meta property="og:type" content="website">
+
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='50' fill='%2310b981'/><text x='50' y='68' font-size='52' text-anchor='middle'>💚</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
+
+<script>
+tailwind.config = {
+  theme: {
+    extend: {
+      fontFamily: { sans: ['"IBM Plex Sans Thai"','system-ui','sans-serif'] },
+      colors: {
+        brand: { 50:'#ecfdf5',100:'#d1fae5',200:'#a7f3d0',300:'#6ee7b7',400:'#34d399',
+                 500:'#10b981',600:'#059669',700:'#047857',800:'#065f46',900:'#064e3b' },
+        ink:   { 900:'#0f2e24', 700:'#26483d', 500:'#5b7a6f', 400:'#8aa79c' },
+        paper: '#F4F8F6',
+      },
+      boxShadow: {
+        card: '0 2px 14px -4px rgba(6,78,59,.10), 0 1px 3px rgba(6,78,59,.06)',
+        lift: '0 12px 32px -10px rgba(6,78,59,.22)',
+        nav:  '0 -4px 24px -8px rgba(6,78,59,.14)',
+      },
+    }
+  }
+}
+</script>
+
+<style>
+  *{ -webkit-tap-highlight-color:transparent }
+  body{ background:#F4F8F6; overscroll-behavior-y:none; }
+  ::-webkit-scrollbar{ width:0; height:0 }
+  .safe-b{ padding-bottom:env(safe-area-inset-bottom) }
+  .safe-t{ padding-top:env(safe-area-inset-top) }
+
+  .fade-up{ animation:fu .35s cubic-bezier(.22,.9,.3,1) both }
+  @keyframes fu{ from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:none} }
+  .pop{ animation:pop .3s cubic-bezier(.2,1.4,.4,1) both }
+  @keyframes pop{ from{opacity:0;transform:scale(.9)} to{opacity:1;transform:scale(1)} }
+  .toast-up{ animation:tu .32s cubic-bezier(.2,.9,.3,1) both }
+  @keyframes tu{ from{opacity:0;transform:translateY(24px)} to{opacity:1;transform:none} }
+
+  .ring-pulse::before{
+    content:''; position:absolute; inset:-6px; border-radius:9999px;
+    border:2px solid #34d399; animation:rp 1.8s ease-out infinite;
+  }
+  @keyframes rp{ 0%{transform:scale(.92);opacity:.9} 100%{transform:scale(1.25);opacity:0} }
+
+  .press:active{ transform:scale(.965) }
+  .press{ transition:transform .12s ease, box-shadow .2s ease }
+
+  .glass{ background:rgba(255,255,255,.16); backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px) }
+  .num{ font-variant-numeric:tabular-nums; letter-spacing:-.02em }
+  .shimmer{ background:linear-gradient(90deg,#eef4f1 25%,#f8fbfa 50%,#eef4f1 75%); background-size:200% 100%; animation:sh 1.3s infinite }
+  @keyframes sh{ 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+</style>
 </head>
 <body>
-    <div id="root"></div>
+<div id="root"></div>
 
-    <script type="text/babel">
-        const firebaseConfig = {
-            apiKey: "AIzaSyD86PLSeOfkyVV8rCpc426G6MbEM_7Y4LU",
-            authDomain: "health-passport-school.firebaseapp.com",
-            projectId: "health-passport-school",
-            storageBucket: "health-passport-school.firebasestorage.app",
-            messagingSenderId: "282808112905",
-            appId: "1:282808112905:web:6a852eb4de9b9e146e65d8"
-        };
+<script type="text/babel">
+const { useState, useEffect, useRef, useMemo, useCallback } = React;
 
-        if (!firebase.apps.length) firebase.initializeApp(firebaseConfig);
-        const auth = firebase.auth();
-        const db = firebase.firestore();
-        const APP_ID = 'health-passport-final'; // เปลี่ยน Path ฐานข้อมูลใหม่ให้คลีนๆ
-        const TASKS_PATH = `artifacts/${APP_ID}/public/data/tasks`;
+/* ============================================================
+   1) CONFIG
+============================================================ */
+const firebaseConfig = {
+  apiKey: "AIza...........",
+  authDomain: "health-passport-school.firebaseapp.com",
+  projectId: "health-passport-school",
+  storageBucket: "health-passport-school.appspot.com",
+  messagingSenderId: "000000000000",
+  appId: "1:000000000000:web:xxxxxxxxxxxx"
+};
 
-        const { useState, useEffect, useRef } = React;
+const TASKS_PATH = 'artifacts/health-passport-v5/public/data/tasks';
+const USERS_PATH = 'artifacts/health-passport-v5/public/data/users'; 
+const TEACHER_PASSWORD = '191919';
+const LS_KEY = 'hp_user_v5';
 
-        // โครงสร้าง 4 กิจกรรม
-        const ACTIVITIES = [
-            { id: 'run', title: 'วิ่งสะสมระยะ', type: 'gps', icon: 'fa-person-running', points: 15, color: 'text-emerald-500 bg-emerald-50' },
-            { id: 'family', title: 'Sport Family', type: 'photo2', icon: 'fa-people-group', points: 20, color: 'text-orange-500 bg-orange-50' },
-            { id: 'sport', title: 'เล่นกีฬา', type: 'photo2', icon: 'fa-basketball', points: 15, color: 'text-blue-500 bg-blue-50' },
-            { id: 'dance', title: 'Dancing', type: 'photo2', icon: 'fa-music', points: 15, color: 'text-purple-500 bg-purple-50' }
-        ];
+// [อัปเดต]: ปรับตั้งค่า GPS ใหม่ ให้ไวขึ้น ระยะขึ้นง่ายขึ้น แต่ยังกันนั่งนิ่งๆ ได้
+const GPS = {
+  maxAccuracy: 35,    // อนุโลมให้สัญญาณแกว่งได้มากขึ้น (เดิม 25)
+  warmupFixes: 1,     // ลดเวลาอุ่นเครื่อง GPS (เดิม 3)
+  minMove: 3,         // ขยับแค่ 3 เมตรก็นับแล้ว (เดิม 8)
+  noiseFactor: 0.8,   // ลดตัวคูณการกรองสัญญาณรบกวน (เดิม 1.2)
+  minSpeed: 0.3,      // ลดความเร็วขั้นต่ำ (ประมาณเดินช้าๆ ก็นับ) (เดิม 0.6)
+  maxSpeed: 8,        // ไม่เกิน 28 กม./ชม. (กันนั่งมอเตอร์ไซค์)
+  moveStreak: 1,      // นับสะสมทันที ไม่ต้องรอให้เดินต่อเนื่อง (เดิม 2)
+};
 
-        // ฟังก์ชันบีบอัดรูป
-        const compressImage = (file) => {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const img = new Image();
-                    img.onload = () => {
-                        const canvas = document.createElement('canvas');
-                        const MAX = 500;
-                        const scale = MAX / img.width;
-                        canvas.width = MAX; canvas.height = img.height * scale;
-                        const ctx = canvas.getContext('2d');
-                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                        resolve(canvas.toDataURL('image/jpeg', 0.6));
-                    };
-                    img.src = e.target.result;
-                };
-                reader.readAsDataURL(file);
-            });
-        };
+let db=null, auth=null, initError=null;
+try { firebase.initializeApp(firebaseConfig); db=firebase.firestore(); auth=firebase.auth(); }
+catch(e){ initError = e.message; }
 
-        const getDistance = (lat1, lon1, lat2, lon2) => {
-            const R = 6371; const dLat = (lat2 - lat1) * (Math.PI / 180); const dLon = (lon2 - lon1) * (Math.PI / 180);
-            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); 
-            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); 
-        };
+const ACTIVITIES = [
+  { id:'running', name:'วิ่งสะสมระยะ', short:'วิ่ง', icon:'fa-person-running',
+    tint:'bg-sky-50', ic:'bg-sky-500', text:'text-sky-600', ring:'#0ea5e9',
+    type:'gps', minKm:0.5, desc:'ระบบคำนวณ HP จากความเร็วจริง (Pace)' },
+  { id:'sport_family', name:'Sport Family', short:'ครอบครัว', icon:'fa-people-roof',
+    tint:'bg-brand-50', ic:'bg-brand-500', text:'text-brand-600', ring:'#10b981',
+    type:'photo', minMin:10, desc:'ออกกำลังกายกับครอบครัว', rate: 0.65 },
+  { id:'sport', name:'เล่นกีฬา', short:'กีฬา', icon:'fa-basketball',
+    tint:'bg-amber-50', ic:'bg-amber-500', text:'text-amber-600', ring:'#f59e0b',
+    type:'photo', minMin:10, desc:'เล่นกีฬาที่ชอบ', rate: 0.45 },
+  { id:'dancing', name:'Dancing', short:'เต้น', icon:'fa-music',
+    tint:'bg-rose-50', ic:'bg-rose-500', text:'text-rose-600', ring:'#f43f5e',
+    type:'photo', minMin:10, desc:'เต้นออกกำลังกาย', rate: 0.45 },
+];
+const actById = id => ACTIVITIES.find(a => a.id === id);
 
-        const formatTime = (secs) => `${Math.floor(secs / 60).toString().padStart(2, '0')}:${(secs % 60).toString().padStart(2, '0')}`;
+/* ============================================================
+   2) HELPERS
+============================================================ */
+function getDistanceM(lat1,lon1,lat2,lon2){
+  const R=6371000, toRad=d=>d*Math.PI/180;
+  const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+const fmtTime = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+const fmtDT = ts => ts ? new Date(ts).toLocaleString('th-TH',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}) : '-';
+const greet = () => { const h=new Date().getHours(); return h<12?'สวัสดีตอนเช้า':h<17?'สวัสดีตอนบ่าย':'สวัสดีตอนเย็น'; };
+const initial = n => (n||'?').trim().charAt(0);
+const getStartOfWeek = (dStr) => { const d = dStr ? new Date(dStr) : new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()-((d.getDay()+6)%7)); return d; };
+const shortGrade = g => g==='มัธยมศึกษาปีที่ 1'?'ม.1':g==='มัธยมศึกษาปีที่ 2'?'ม.2':g==='มัธยมศึกษาปีที่ 3'?'ม.3':g;
 
-        function App() {
-            const [user, setUser] = useState(null);
-            const [isLoggedIn, setIsLoggedIn] = useState(false);
-            const [role, setRole] = useState('student');
-            const [studentName, setStudentName] = useState('');
-            const [inputName, setInputName] = useState('');
-            const [teacherPassword, setTeacherPassword] = useState('');
-            const [activeTab, setActiveTab] = useState('home'); 
+function compressImage(file, maxSize=560, quality=.72){
+  return new Promise((res,rej)=>{
+    if(!file || !file.type.startsWith('image/')) return rej(new Error('ไฟล์ไม่ใช่รูปภาพ'));
+    const r=new FileReader();
+    r.onload=e=>{ const img=new Image();
+      img.onload=()=>{ let {width:w,height:h}=img;
+        if(w>h&&w>maxSize){h=h*maxSize/w;w=maxSize} else if(h>maxSize){w=w*maxSize/h;h=maxSize}
+        const c=document.createElement('canvas'); c.width=w; c.height=h;
+        c.getContext('2d').drawImage(img,0,0,w,h);
+        res(c.toDataURL('image/jpeg',quality));
+      };
+      img.onerror=()=>rej(new Error('อ่านรูปไม่สำเร็จ')); img.src=e.target.result; };
+    r.onerror=()=>rej(new Error('อ่านไฟล์ไม่สำเร็จ')); r.readAsDataURL(file);
+  });
+}
+
+function calcStats(approvedTasks) {
+    const hpByDay = {}; const hpByType = {};
+    approvedTasks.forEach(t=>{
+       const dateStr = new Date(t.createdAt).toLocaleDateString('en-CA');
+       if(!hpByDay[dateStr]) hpByDay[dateStr] = [];
+       hpByDay[dateStr].push(t.hp||0);
+       
+       if(!hpByType[t.activityId]) hpByType[t.activityId] = 0;
+       hpByType[t.activityId] += (t.hp||0);
+    });
+    
+    const hpByWeek = {};
+    let totalAcc = 0, totalGrading = 0, activeWeeks = 0;
+    
+    Object.entries(hpByDay).forEach(([dStr, hps])=>{
+       const cappedDay = Math.min(100, hps.reduce((a,b)=>a+b,0)); 
+       const wKey = getStartOfWeek(dStr).toLocaleDateString('en-CA');
+       if(!hpByWeek[wKey]) hpByWeek[wKey] = 0;
+       hpByWeek[wKey] += cappedDay;
+    });
+    
+    Object.values(hpByWeek).forEach(wHP => {
+       totalAcc += wHP; 
+       const gHP = Math.min(600, wHP); 
+       totalGrading += gHP;
+       if(gHP >= 100) activeWeeks++; 
+    });
+    
+    const variety = Object.values(hpByType).filter(h=>h>=100).length;
+    const scoreA = Math.min(7, totalGrading / 100);
+    const scoreB = activeWeeks>=4 ? 2.0 : activeWeeks===3 ? 1.5 : activeWeeks===2 ? 1.0 : activeWeeks===1 ? 0.5 : 0;
+    const scoreC = variety>=4 ? 1.0 : variety===3 ? 0.7 : variety===2 ? 0.4 : 0;
+    const totalScore = (scoreA+scoreB+scoreC).toFixed(1);
+    
+    return { totalAcc, totalGrading, activeWeeks, variety, scoreA, scoreB, scoreC, totalScore, hpByWeek, hpByDay };
+}
+
+/* ============================================================
+   3) ERROR BOUNDARY
+============================================================ */
+class ErrorBoundary extends React.Component{
+  constructor(p){super(p);this.state={err:null}}
+  static getDerivedStateFromError(err){return {err}}
+  componentDidCatch(e,i){console.error('[HP]',e,i)}
+  render(){
+    if(!this.state.err) return this.props.children;
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="bg-white rounded-3xl shadow-lift p-8 max-w-sm w-full text-center">
+          <div className="w-16 h-16 mx-auto rounded-2xl bg-amber-50 flex items-center justify-center"><i className="fas fa-triangle-exclamation text-3xl text-amber-500"></i></div>
+          <h2 className="text-lg font-bold text-ink-900 mt-4">เกิดข้อผิดพลาด</h2>
+          <button onClick={()=>this.setState({err:null})} className="mt-6 w-full bg-brand-600 text-white h-13 py-3.5 rounded-2xl font-semibold press">กลับหน้าหลัก</button>
+        </div>
+      </div>
+    );
+  }
+}
+
+/* ============================================================
+   4) APP
+============================================================ */
+function App(){
+  const [booting,setBooting]=useState(true);
+  const [user,setUser]=useState(null);
+  const [loginMode,setLoginMode]=useState('student');
+  const [fName,setFName]=useState(''); const [fNumber,setFNumber]=useState(''); const [fGrade,setFGrade]=useState(''); const [fPass,setFPass]=useState('');
+
+  const [activeTab,setActiveTab]=useState('home');
+  const [selectedAct,setSelectedAct]=useState(null);
+
+  const [isTracking,setIsTracking]=useState(false);
+  const [distance,setDistance]=useState(0);
+  const [elapsedTime,setElapsedTime]=useState(0);
+  const [movingTime,setMovingTime]=useState(0);
+  const [gpsAcc,setGpsAcc]=useState(null);
+  const [gpsState,setGpsState]=useState('idle');
+  
+  const [imgBefore,setImgBefore]=useState(null); 
+  const [imgAfter,setImgAfter]=useState(null);
+  const [timeBefore,setTimeBefore]=useState(null); 
+  const [timeAfter,setTimeAfter]=useState(null);
+  const [busy,setBusy]=useState(false);
+
+  const [tasks,setTasks]=useState([]);
+  const [usersList,setUsersList]=useState([]);
+  const [loadingData,setLoadingData]=useState(true);
+  const [preview,setPreview]=useState(null);
+  const [toast,setToast]=useState(null);
+  
+  const [teacherFilterGrade, setTeacherFilterGrade] = useState('มัธยมศึกษาปีที่ 1');
+
+  const watchRef=useRef(null), timerRef=useRef(null), toastRef=useRef(null);
+  const lastPos=useRef(null), warmup=useRef(0), streak=useRef(0), pending=useRef(0), movingAt=useRef(0);
+
+  const showToast=useCallback((msg,type='success')=>{
+    setToast({msg,type}); clearTimeout(toastRef.current);
+    toastRef.current=setTimeout(()=>setToast(null),2600);
+  },[]);
+
+  const timeDiffMinutes=useMemo(()=> (timeBefore&&timeAfter)?Math.max(0,Math.round((timeAfter-timeBefore)/60000)):0,[timeBefore,timeAfter]);
+
+  useEffect(()=>{
+    if(initError){ setBooting(false); return; }
+    const s=localStorage.getItem(LS_KEY);
+    if(s){ try{ setUser(JSON.parse(s)); }catch(e){ localStorage.removeItem(LS_KEY); } }
+    auth.signInAnonymously().catch(e=>console.warn(e.message)).finally(()=>setTimeout(()=>setBooting(false),700));
+  },[]);
+
+  useEffect(()=>{
+    if(!user||!db) return;
+    setLoadingData(true);
+    const unsubTasks=db.collection(TASKS_PATH).onSnapshot(
+      snap=>{ setTasks(snap.docs.map(d=>({id:d.id,...d.data()}))); setLoadingData(false); },
+      err=>{ console.error(err); showToast('โหลดข้อมูลงานไม่สำเร็จ','error'); setLoadingData(false); }
+    );
+    const unsubUsers=db.collection(USERS_PATH).onSnapshot(
+      snap=>{ setUsersList(snap.docs.map(d=>({id:d.id,...d.data()}))); }
+    );
+    return ()=> { unsubTasks(); unsubUsers(); };
+  },[user,showToast]);
+
+  const stopWatchers=useCallback(()=>{
+    if(watchRef.current!==null){ navigator.geolocation.clearWatch(watchRef.current); watchRef.current=null; }
+    if(timerRef.current){ clearInterval(timerRef.current); timerRef.current=null; }
+    lastPos.current=null; warmup.current=0; streak.current=0; pending.current=0; movingAt.current=0;
+  },[]);
+  useEffect(()=>()=>stopWatchers(),[stopWatchers]);
+
+  const resetActivity=useCallback(()=>{
+    stopWatchers(); setSelectedAct(null); setIsTracking(false);
+    setDistance(0); setElapsedTime(0); setMovingTime(0); setGpsAcc(null); setGpsState('idle');
+    setImgBefore(null); setImgAfter(null); setTimeBefore(null); setTimeAfter(null);
+    setBusy(false); setActiveTab('home');
+  },[stopWatchers]);
+
+  useEffect(()=>{
+    if(activeTab==='activity'&&!selectedAct) setActiveTab('home');
+    if(activeTab==='review'&&user?.role!=='teacher') setActiveTab('home');
+    if(activeTab==='scores'&&user?.role!=='teacher') setActiveTab('home');
+    
+    if (activeTab === 'activity' && selectedAct && selectedAct.type !== 'gps' && user) {
+      const draftKey = `hp_draft_${user.name}_${selectedAct.id}`;
+      const draftStr = localStorage.getItem(draftKey);
+      let loaded = false;
+      if (draftStr) {
+        try {
+          const draft = JSON.parse(draftStr);
+          if (Date.now() - draft.time < 5 * 3600 * 1000) {
+            setImgBefore(draft.b64); setTimeBefore(draft.time);
+            loaded = true;
+          } else { localStorage.removeItem(draftKey); }
+        } catch(e){}
+      }
+      if(!loaded){ setImgBefore(null); setTimeBefore(null); }
+      setImgAfter(null); setTimeAfter(null); 
+    }
+  },[activeTab,selectedAct,user]);
+
+  const navigate=useCallback((tab,act=null)=>{
+    setActiveTab(tab); setSelectedAct(act); window.history.pushState({hp:true,tab},'');
+  },[]);
+
+  const backRef=useRef(()=>{});
+  backRef.current=()=>{
+    if(preview){ setPreview(null); window.history.pushState({hp:true},''); return; }
+    if(isTracking && !window.confirm('กำลังจับเวลาอยู่ ยืนยันที่จะออกหรือไม่?')){ window.history.pushState({hp:true,tab:activeTab},''); return; }
+    if(activeTab==='activity') resetActivity();
+    else if(activeTab!=='home') setActiveTab(user?.role==='teacher'?'review':'home');
+    else window.history.pushState({hp:true,tab:'home'},'');
+  };
+  useEffect(()=>{
+    if(!user) return;
+    window.history.replaceState({hp:true,tab:'home'},''); window.history.pushState({hp:true,tab:'home'},'');
+    const onPop=()=>backRef.current(); window.addEventListener('popstate',onPop);
+    return ()=>window.removeEventListener('popstate',onPop);
+  },[user]);
+
+  const handleLogin=async(e)=>{
+    e.preventDefault();
+    if(loginMode==='teacher'){
+      if(fPass!==TEACHER_PASSWORD) return showToast('รหัสผ่านไม่ถูกต้อง','error');
+      const u={name:'คุณครู',grade:'-',studentNo:'-',role:'teacher'};
+      localStorage.setItem(LS_KEY,JSON.stringify(u)); setUser(u); setActiveTab('review'); return showToast('ยินดีต้อนรับคุณครู');
+    }
+    
+    const nameKey = fName.trim();
+    const numKey = fNumber.trim();
+    const gradeKey = fGrade;
+
+    if(!nameKey || !numKey || !gradeKey) return showToast('กรุณากรอกข้อมูลให้ครบถ้วน','error');
+    setBusy(true);
+    
+    try {
+       const userRef = db.collection(USERS_PATH).doc(nameKey);
+       const doc = await userRef.get();
+       
+       if(doc.exists) {
+          const data = doc.data();
+          if(data.studentNo !== numKey || data.grade !== gradeKey) {
+             setBusy(false);
+             return showToast('ชื่อนี้ลงทะเบียนด้วยเลขที่หรือชั้นอื่นไปแล้ว','error');
+          }
+          const u = { name: nameKey, studentNo: numKey, grade: gradeKey, role: 'student' };
+          localStorage.setItem(LS_KEY, JSON.stringify(u)); setUser(u); setActiveTab('home'); showToast(`ยินดีต้อนรับ ${u.name}`);
+       } else {
+          const duplicateCheck = await db.collection(USERS_PATH)
+             .where('grade', '==', gradeKey)
+             .where('studentNo', '==', numKey)
+             .get();
+             
+          if(!duplicateCheck.empty) {
+             setBusy(false);
+             return showToast(`เลขที่ ${numKey} ชั้น ${shortGrade(gradeKey)} มีคนใช้แล้ว`, 'error');
+          }
+
+          await userRef.set({ name: nameKey, studentNo: numKey, grade: gradeKey, role: 'student', createdAt: Date.now() });
+          const u = { name: nameKey, studentNo: numKey, grade: gradeKey, role: 'student' };
+          localStorage.setItem(LS_KEY, JSON.stringify(u)); setUser(u); setActiveTab('home'); showToast('สมัครบัญชีสำเร็จ!');
+       }
+    } catch(err) {
+       showToast('เชื่อมต่อฐานข้อมูลไม่สำเร็จ','error');
+    }
+    setBusy(false);
+  };
+
+  const handleLogout=()=>{
+    if(!window.confirm('ต้องการออกจากระบบใช่หรือไม่?')) return;
+    resetActivity(); 
+    localStorage.removeItem(LS_KEY); setUser(null); setTasks([]); setActiveTab('home'); setSelectedAct(null);
+  };
+
+  const deleteStudent = async (studentName) => {
+    if(!window.confirm(`⚠️ ต้องการลบบัญชีของ "${studentName}" ใช่หรือไม่?\nข้อมูลและงานที่ส่งแล้วจะถูกลบทิ้งทั้งหมด`)) return;
+    setBusy(true);
+    try {
+      await db.collection(USERS_PATH).doc(studentName).delete();
+      const snapshot = await db.collection(TASKS_PATH).where('studentName','==',studentName).get();
+      if(!snapshot.empty) {
+         const batch = db.batch();
+         snapshot.docs.forEach(d => batch.delete(d.ref));
+         await batch.commit();
+      }
+      showToast('ลบบัญชีและประวัติเรียบร้อย');
+    } catch(e) { showToast('ลบไม่สำเร็จ','error'); }
+    setBusy(false);
+  };
+
+  // [อัปเดต]: ฟังก์ชันจัดการสัญญาณ GPS ที่ปรับจูนใหม่ให้จับระยะง่ายขึ้น
+  const onPosition=useCallback(pos=>{
+    const {latitude:lat,longitude:lng,accuracy:acc,speed:devSpeed}=pos.coords; const t=pos.timestamp||Date.now();
+    setGpsAcc(Math.round(acc));
+    
+    if(warmup.current<GPS.warmupFixes){ 
+        warmup.current++; lastPos.current={lat,lng,t,acc}; setGpsState('warmup'); return; 
+    }
+    if(acc>GPS.maxAccuracy){ 
+        setGpsState('weak'); streak.current=0; return; 
+    }
+    
+    const prev=lastPos.current; 
+    if(!prev){ lastPos.current={lat,lng,t,acc}; return; }
+    
+    const dt=(t-prev.t)/1000; 
+    if(dt<1) return;
+    
+    const d=getDistanceM(prev.lat,prev.lng,lat,lng);
+    
+    // คำนวณ Floor (เกณฑ์ขยับขั้นต่ำ) โดยใช้ NoiseFactor ที่ลดลง
+    const floor=Math.max(GPS.minMove,((acc+prev.acc)/2)*GPS.noiseFactor);
+    
+    if(d<floor){ 
+        setGpsState('idle'); streak.current=0; pending.current=0; return; 
+    }
+    
+    const v=d/dt;
+    if(v>GPS.maxSpeed){ 
+        lastPos.current={lat,lng,t,acc}; streak.current=0; pending.current=0; setGpsState('idle'); return; 
+    }
+    if(v<GPS.minSpeed){ 
+        setGpsState('idle'); streak.current=0; pending.current=0; return; 
+    }
+    if(typeof devSpeed==='number'&&devSpeed>=0&&devSpeed<GPS.minSpeed){ 
+        setGpsState('idle'); streak.current=0; pending.current=0; return; 
+    }
+    
+    lastPos.current={lat,lng,t,acc}; streak.current++;
+    
+    if(streak.current<GPS.moveStreak){ 
+        pending.current+=d; setGpsState('idle'); return; 
+    }
+    
+    const add=d+pending.current; pending.current=0;
+    setDistance(x=>x+add/1000); 
+    movingAt.current=Date.now(); 
+    setGpsState('moving');
+  },[]);
+
+  const startRunning=()=>{
+    if(!navigator.geolocation) return showToast('อุปกรณ์ไม่รองรับ GPS','error');
+    setDistance(0); setElapsedTime(0); setMovingTime(0); setGpsState('warmup');
+    lastPos.current=null; warmup.current=0; streak.current=0; pending.current=0; movingAt.current=0; setIsTracking(true);
+    timerRef.current=setInterval(()=>{ setElapsedTime(t=>t+1); if(Date.now()-movingAt.current<6000) setMovingTime(t=>t+1); },1000);
+    // อัปเดต options ของ GPS ให้ดึงข้อมูลบ่อยขึ้นและใช้พลังงานสูงสุด
+    watchRef.current=navigator.geolocation.watchPosition(onPosition,err=>showToast('GPS: '+err.message,'error'),{enableHighAccuracy:true,maximumAge:0,timeout:10000});
+    showToast('กำลังจับสัญญาณ GPS...');
+  };
+  const stopRunning=()=>{ stopWatchers(); setIsTracking(false); setGpsState('idle'); };
+
+  const handleUpload=async(e,slot)=>{
+    const f=e.target.files?.[0]; if(!f) return;
+    setBusy(true);
+    try{
+      const b64=await compressImage(f);
+      const now = Date.now();
+      if(slot===1){ 
+        setImgBefore(b64); setTimeBefore(now); 
+        if (selectedAct && user) localStorage.setItem(`hp_draft_${user.name}_${selectedAct.id}`, JSON.stringify({b64, time: now}));
+        showToast('บันทึกรูปก่อนเริ่มแล้ว'); 
+      }
+      else { 
+        setImgAfter(b64); setTimeAfter(now); 
+        showToast('บันทึกรูปหลังเสร็จแล้ว'); 
+      }
+    }catch(err){ showToast(err.message,'error'); }
+    finally{ setBusy(false); e.target.value=''; }
+  };
+  
+  const deleteBeforePhoto = useCallback(() => {
+    if(!window.confirm('ต้องการลบรูปก่อนเริ่มใช่หรือไม่?')) return;
+    setImgBefore(null); setTimeBefore(null);
+    if (selectedAct && user) localStorage.removeItem(`hp_draft_${user.name}_${selectedAct.id}`);
+  }, [selectedAct, user]);
+
+  const myTasks=useMemo(()=>tasks.filter(t=>t.studentName===user?.name).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)),[tasks,user]);
+  
+  const submitTask=async()=>{
+    if(!selectedAct||!user) return;
+    const a=selectedAct;
+    
+    const lastT = myTasks[0];
+    if(lastT && lastT.createdAt) {
+      const hrs = (Date.now() - lastT.createdAt) / 3600000;
+      if(hrs < 2) return showToast(`ต้องเว้นระยะ 2 ชั่วโมง (รออีก ${Math.ceil((2-hrs)*60)} นาที)`,'error');
+    }
+
+    let hp = 0;
+    if(a.type==='gps'){
+      if(isTracking) return showToast('กรุณากดหยุดจับเวลาก่อนส่ง','error');
+      if(distance<a.minKm) return showToast(`ระยะยังไม่ถึง ${a.minKm} กม.`,'error');
+      const dist = Number(distance.toFixed(2));
+      const mins = elapsedTime / 60;
+      const pace = dist > 0 ? mins / dist : 0;
+      let runRate = 0.25; 
+      if (pace < 3) runRate = 0; 
+      else if (pace <= 4.8) runRate = 0.75; 
+      else if (pace <= 6.32) runRate = 0.65; 
+      else if (pace <= 7.5) runRate = 0.55;  
+      else if (pace <= 10.92) runRate = 0.40; 
+      hp = runRate * mins;
+    }else{
+      if(!imgBefore||!imgAfter) return showToast('ต้องมีรูปครบทั้ง 2 ใบ','error');
+      if(timeDiffMinutes<a.minMin) return showToast(`เวลายังไม่ถึง ${a.minMin} นาที`,'error');
+      const effectiveMins = Math.min(240, timeDiffMinutes); 
+      hp = a.rate * effectiveMins;
+    }
+
+    hp = Math.min(100, Math.round(hp)); 
+    if(hp <= 0) return showToast('กิจกรรมนี้ไม่ผ่านเกณฑ์การคำนวณ HP (เช่น วิ่งเร็วกว่า 3 นาที/กม.)','error');
+
+    setBusy(true);
+    try{
+      await db.collection(TASKS_PATH).add({
+        studentName:user.name, studentNo:user.studentNo, grade:user.grade,
+        activityId:a.id, activityName:a.name, hp:hp, status:'pending',
+        distance:a.type==='gps'?Number(distance.toFixed(2)):null, duration:a.type==='gps'?elapsedTime:timeDiffMinutes*60,
+        movingTime:a.type==='gps'?movingTime:null, avgPace:a.type==='gps'&&distance>0?Number((elapsedTime/60/distance).toFixed(2)):null,
+        imgBefore:imgBefore||null, imgAfter:imgAfter||null, timeBefore:timeBefore||null, timeAfter:timeAfter||null,
+        createdAt:Date.now(), serverAt:firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      showToast('ส่งให้ครูตรวจเรียบร้อย!'); 
+      if (selectedAct && user) localStorage.removeItem(`hp_draft_${user.name}_${selectedAct.id}`); 
+      resetActivity();
+    }catch(err){ showToast('บันทึกไม่สำเร็จ','error'); }
+    finally{ setBusy(false); }
+  };
+
+  const review=async(id,status)=>{
+    try{
+      await db.collection(TASKS_PATH).doc(id).update({status,reviewedAt:Date.now(),reviewedBy:user.name});
+      showToast(status==='approved'?'อนุมัติแล้ว':'ปฏิเสธแล้ว',status==='approved'?'success':'error');
+    }catch(err){ showToast('อัปเดตไม่สำเร็จ','error'); }
+  };
+
+  const myTasksApproved = useMemo(()=>myTasks.filter(t=>t.status==='approved'),[myTasks]);
+  const stats = useMemo(()=> calcStats(myTasksApproved), [myTasksApproved]);
+
+  const todayStr = new Date().toLocaleDateString('en-CA');
+  const todayHP = Math.min(100, (stats.hpByDay[todayStr]||[]).reduce((a,b)=>a+b,0));
+  const currWKey = getStartOfWeek().toLocaleDateString('en-CA');
+  const currWeekGradingHP = Math.min(600, stats.hpByWeek[currWKey]||0); 
+  const currWeekAccHP = stats.hpByWeek[currWKey]||0; 
+
+  const pendingAll=useMemo(()=>tasks.filter(t=>t.status==='pending').sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)),[tasks]);
+  
+  const leaderboard=useMemo(()=>{
+    const m={};
+    tasks.filter(t=>t.status==='approved').forEach(t=>{
+      const k=t.studentName||'-';
+      if(!m[k]) m[k]={name:k,grade:t.grade||'-',studentNo:t.studentNo||'-',hpByDay:{}};
+      const dateStr = new Date(t.createdAt).toLocaleDateString('en-CA');
+      if(!m[k].hpByDay[dateStr]) m[k].hpByDay[dateStr] = [];
+      m[k].hpByDay[dateStr].push(t.hp || 0);
+    });
+    const result = Object.values(m).map(u => {
+      let total = 0;
+      Object.entries(u.hpByDay).forEach(([dStr, hps]) => {
+          total += Math.min(100, hps.reduce((a,b)=>a+b,0)); 
+      });
+      u.points = total;
+      return u;
+    }).sort((a,b)=>b.points-a.points).slice(0,10);
+    return result;
+  },[tasks]);
+  const myRank=useMemo(()=>leaderboard.findIndex(r=>r.name===user?.name)+1,[leaderboard,user]);
+  
+  const filteredTeacherUsers = useMemo(()=>{
+      return usersList
+        .filter(u => u.role==='student' && u.grade === teacherFilterGrade)
+        .sort((a,b)=> Number(a.studentNo) - Number(b.studentNo));
+  }, [usersList, teacherFilterGrade]);
+
+  const gpsInfo={
+    warmup:['text-amber-600','bg-amber-50','fa-satellite','กำลังจับสัญญาณ GPS'], weak:['text-rose-600','bg-rose-50','fa-triangle-exclamation',`สัญญาณอ่อน (±${gpsAcc} ม.)`],
+    idle:['text-ink-400','bg-slate-50','fa-pause','อยู่นิ่ง — ยังไม่นับระยะ'], moving:['text-brand-600','bg-brand-50','fa-person-running','กำลังเคลื่อนที่'],
+  }[gpsState]||['text-ink-400','bg-slate-50','fa-satellite-dish','-'];
+
+  if(initError) return <div className="min-h-screen flex items-center justify-center p-6">Error: {initError}</div>;
+  if(booting) return <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-b from-brand-500 to-brand-600"><h1 className="text-white text-2xl font-bold tracking-widest mt-6">HEALTH PASSPORT</h1></div>;
+  if(!user) return (
+    <div className="min-h-screen bg-gradient-to-b from-brand-500 via-brand-500 to-brand-700 flex flex-col items-center justify-center p-6">
+      <Toast toast={toast}/>
+      <div className="w-full max-w-sm fade-up">
+        <div className="text-center mb-7"><h1 className="text-white text-2xl font-bold tracking-wide">Health Passport</h1></div>
+        <div className="bg-white rounded-[28px] shadow-lift p-6">
+          <div className="grid grid-cols-2 gap-1 p-1 bg-paper rounded-2xl mb-5">
+            {[['student','นักเรียน','fa-child-reaching'],['teacher','คุณครู','fa-chalkboard-user']].map(([m,l,ic])=>(
+              <button key={m} onClick={()=>setLoginMode(m)} className={`py-3 rounded-xl text-sm font-semibold ${loginMode===m?'bg-white shadow-card text-brand-600':'text-ink-400'}`}><i className={`fas ${ic} mr-1.5`}></i>{l}</button>
+            ))}
+          </div>
+          <form onSubmit={handleLogin} className="space-y-3 relative">
+            {busy && <div className="absolute inset-0 z-10 bg-white/50 flex items-center justify-center rounded-2xl"><i className="fas fa-spinner fa-spin text-2xl text-brand-500"></i></div>}
             
-            const [allTasks, setAllTasks] = useState([]);
-            const [showNotif, setShowNotif] = useState({ show: false, msg: '', type: 'success' });
-            const [isLoading, setIsLoading] = useState(false);
-            const [selectedAct, setSelectedAct] = useState(null);
-
-            // State วิ่ง GPS
-            const [isTracking, setIsTracking] = useState(false);
-            const [distance, setDistance] = useState(0);
-            const [elapsedTime, setElapsedTime] = useState(0);
-
-            // State ถ่ายรูป 2 ใบ
-            const [imgBefore, setImgBefore] = useState(null);
-            const [imgAfter, setImgAfter] = useState(null);
-            const [timeBefore, setTimeBefore] = useState(null); 
-            const [timeAfter, setTimeAfter] = useState(null);   
-            const [timeDiffMinutes, setTimeDiffMinutes] = useState(0);
-
-            const watchIdRef = useRef(null);
-            const timerRef = useRef(null);
-            const lastPosRef = useRef(null);
-            const fileInputRef1 = useRef(null);
-            const fileInputRef2 = useRef(null);
-
-            useEffect(() => {
-                auth.signInAnonymously().catch(console.error);
-                return auth.onAuthStateChanged(setUser);
-            }, []);
-
-            useEffect(() => {
-                if (!user) return;
-                const unsub = db.collection(TASKS_PATH).onSnapshot(snap => {
-                    const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    data.sort((a, b) => b.createdAt - a.createdAt);
-                    setAllTasks(data);
-                });
-                return unsub;
-            }, [user]);
-
-            const notify = (msg, type = 'success') => {
-                setShowNotif({ show: true, msg, type });
-                setTimeout(() => setShowNotif({ show: false, msg: '', type: '' }), 3000);
-            };
-
-            const handleLogin = (r) => {
-                if (r === 'student') {
-                    if (!inputName.trim()) return notify('กรุณาใส่ชื่อ-นามสกุล', 'error');
-                    setStudentName(inputName.trim());
-                } else {
-                    if (teacherPassword !== '191919') return notify('รหัสผ่านครูผิด!', 'error');
-                }
-                setRole(r);
-                setIsLoggedIn(true);
-                setActiveTab(r === 'student' ? 'home' : 'review');
-                setTeacherPassword('');
-            };
-
-            const startRunning = () => {
-                if (!navigator.geolocation) return notify('มือถือไม่รองรับ GPS', 'error');
-                setIsTracking(true); setDistance(0); setElapsedTime(0); lastPosRef.current = null;
-                timerRef.current = setInterval(() => setElapsedTime(p => p + 1), 1000);
-                watchIdRef.current = navigator.geolocation.watchPosition(
-                    (pos) => {
-                        if (pos.coords.accuracy > 30) return; 
-                        const cLat = pos.coords.latitude; const cLon = pos.coords.longitude;
-                        if (lastPosRef.current) {
-                            const d = getDistance(lastPosRef.current.lat, lastPosRef.current.lon, cLat, cLon);
-                            if (d > 0.003 && d < 0.05) setDistance(p => p + d);
-                        }
-                        lastPosRef.current = { lat: cLat, lon: cLon };
-                    },
-                    console.error,
-                    { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
-                );
-            };
-
-            const stopRunning = () => {
-                setIsTracking(false); clearInterval(timerRef.current); navigator.geolocation.clearWatch(watchIdRef.current);
-                if (distance < 0.1) {
-                    setDistance(0); setElapsedTime(0);
-                    return notify('ระยะทางน้อยไป ไม่ถูกบันทึก (ต้องเกิน 100 เมตร)', 'error');
-                }
-                submitTask({
-                    type: 'gps', distanceKm: distance, durationSec: elapsedTime,
-                    desc: `วิ่งระยะทาง ${distance.toFixed(2)} กม. ใช้เวลา ${Math.floor(elapsedTime/60)} นาที`
-                });
-            };
-
-            const handleUpload1 = async (e) => {
-                if (!e.target.files[0]) return;
-                const base64 = await compressImage(e.target.files[0]);
-                setImgBefore(base64);
-                setTimeBefore(Date.now());
-                notify('บันทึกรูปก่อนเริ่มแล้ว! ไปออกกำลังกายได้เลย!', 'success');
-            };
-
-            const handleUpload2 = async (e) => {
-                if (!e.target.files[0]) return;
-                const base64 = await compressImage(e.target.files[0]);
-                setImgAfter(base64);
-                const now = Date.now();
-                setTimeAfter(now);
-                
-                // คำนวณเป็นนาที
-                if (timeBefore) {
-                    const diffMins = Math.floor((now - timeBefore) / (1000 * 60));
-                    setTimeDiffMinutes(diffMins);
-                }
-            };
-
-            const submitPhotoTask = () => {
-                // กันเด็กถ่ายรูปรัวๆ ไม่ถึง 1 นาที
-                if (timeDiffMinutes < 1) return notify('คุณเพิ่งเริ่มไปแปบเดียวเอง! (ต้องทำกิจกรรมอย่างน้อย 1 นาที)', 'error');
-
-                submitTask({
-                    type: 'photo2', img1: imgBefore, img2: imgAfter, durationMins: timeDiffMinutes,
-                    desc: `ใช้เวลาทำกิจกรรมรวม ${timeDiffMinutes} นาที`
-                });
-            };
-
-            const submitTask = async (extraData) => {
-                setIsLoading(true);
-                try {
-                    await db.collection(TASKS_PATH).add({
-                        studentName,
-                        activityTitle: selectedAct.title,
-                        points: selectedAct.points,
-                        status: 'pending',
-                        timeStr: new Date().toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' }),
-                        createdAt: Date.now(),
-                        ...extraData
-                    });
-                    notify('ส่งข้อมูลสำเร็จ! รอคุณครูตรวจครับ 🎉');
-                    resetActivity();
-                    setActiveTab('home');
-                } catch (error) { notify('เกิดข้อผิดพลาด กรุณาลองใหม่', 'error'); }
-                setIsLoading(false);
-            };
-
-            const resetActivity = () => {
-                setSelectedAct(null); setIsTracking(false); setDistance(0); setElapsedTime(0);
-                setImgBefore(null); setImgAfter(null); setTimeBefore(null); setTimeAfter(null); setTimeDiffMinutes(0);
-            };
-
-            const actionTask = async (id, status) => {
-                await db.collection(TASKS_PATH).doc(id).update({ status });
-                notify(status === 'approved' ? 'อนุมัติงานแล้ว' : 'ปฏิเสธงานแล้ว');
-            };
-
-            const myApproved = allTasks.filter(t => t.studentName === studentName && t.status === 'approved');
-            const myPoints = myApproved.reduce((sum, t) => sum + t.points, 0);
-            const pendingTasks = allTasks.filter(t => t.status === 'pending');
-
-            const stats = allTasks.filter(t => t.status === 'approved').reduce((acc, t) => {
-                if (!acc[t.studentName]) acc[t.studentName] = { name: t.studentName, pts: 0 };
-                acc[t.studentName].pts += t.points;
-                return acc;
-            }, {});
-            const leaderboard = Object.values(stats).sort((a, b) => b.pts - a.pts).slice(0, 10);
-
-            // หน้า Login (ธีมเขียวมิ้นต์)
-            if (!isLoggedIn) return (
-                <div className="min-h-screen flex items-center justify-center p-5 bg-gradient-to-br from-emerald-100 to-green-50">
-                    <div className="w-full max-w-sm bg-white rounded-[2rem] shadow-xl p-8 text-center relative overflow-hidden">
-                        <div className="absolute top-0 left-0 w-full h-2 bg-emerald-400"></div>
-                        
-                        <div className="w-24 h-24 rounded-full flex flex-col items-center justify-center mx-auto mb-4 bg-emerald-400 text-white shadow-lg shadow-emerald-200">
-                            <i className="fa-solid fa-heart-pulse text-4xl"></i>
-                        </div>
-                        <h1 className="text-3xl font-black text-slate-800 tracking-tight">HEALTH</h1>
-                        <p className="text-emerald-500 font-bold tracking-widest text-sm mb-8">PASSPORT</p>
-                        
-                        <div className="space-y-4">
-                            <div className="bg-gray-50 p-4 rounded-2xl border border-gray-100">
-                                <label className="text-xs font-bold text-gray-500 mb-2 block text-left">ชื่อนักเรียน (สะสมแต้ม)</label>
-                                <input type="text" placeholder="ชื่อ - นามสกุล" value={inputName} onChange={e=>setInputName(e.target.value)} className="w-full p-3 rounded-xl border border-gray-200 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none font-medium mb-3"/>
-                                <button onClick={()=>handleLogin('student')} className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-md shadow-emerald-200 active:scale-95 transition">เข้าสู่ระบบนักเรียน</button>
-                            </div>
-                            
-                            <div className="flex gap-2">
-                                <input type="password" placeholder="รหัสครู..." value={teacherPassword} onChange={e=>setTeacherPassword(e.target.value)} className="w-2/3 p-3 rounded-xl border border-gray-200 outline-none text-sm"/>
-                                <button onClick={()=>handleLogin('teacher')} className="w-1/3 bg-slate-800 text-white font-bold rounded-xl text-sm active:scale-95 transition">เข้าตรวจ</button>
-                            </div>
-                        </div>
-                    </div>
+            {loginMode==='student' ? ( 
+              <>
+                <Field icon="fa-user" value={fName} onChange={setFName} placeholder="ชื่อ - นามสกุล"/>
+                <Field icon="fa-hashtag" type="number" value={fNumber} onChange={setFNumber} placeholder="เลขที่"/>
+                <div className="relative">
+                  <i className="fas fa-layer-group absolute left-4 top-1/2 -translate-y-1/2 text-ink-400 text-sm"></i>
+                  <select value={fGrade} onChange={e=>setFGrade(e.target.value)} className="w-full h-14 pl-11 pr-4 rounded-2xl bg-paper border border-transparent focus:bg-white focus:border-brand-400 focus:ring-4 focus:ring-brand-100 outline-none text-ink-900 appearance-none font-sans">
+                     <option value="" disabled>เลือกระดับชั้น</option>
+                     <option value="มัธยมศึกษาปีที่ 1">มัธยมศึกษาปีที่ 1</option>
+                     <option value="มัธยมศึกษาปีที่ 2">มัธยมศึกษาปีที่ 2</option>
+                     <option value="มัธยมศึกษาปีที่ 3">มัธยมศึกษาปีที่ 3</option>
+                  </select>
+                  <i className="fas fa-chevron-down absolute right-4 top-1/2 -translate-y-1/2 text-ink-400 text-xs pointer-events-none"></i>
                 </div>
-            );
+              </>
+            ) : ( <Field icon="fa-lock" type="password" value={fPass} onChange={setFPass} placeholder="รหัสผ่านคุณครู"/> )}
+            <button type="submit" disabled={busy} className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold press mt-1">เข้าสู่ระบบ</button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
 
+  const isStudent = user.role==='student';
+  const hpNeeded = 100 - (stats.totalGrading % 100); 
+
+  return (
+    <div className="min-h-screen pb-28">
+      <Toast toast={toast}/>
+      {preview && (
+        <div onClick={()=>setPreview(null)} className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 fade-up">
+          <img src={preview} className="max-h-[85vh] max-w-full rounded-2xl" alt=""/>
+          <button className="absolute top-6 right-6 w-10 h-10 rounded-full glass text-white"><i className="fas fa-xmark"></i></button>
+        </div>
+      )}
+
+      <header className="relative bg-gradient-to-br from-brand-500 to-brand-700 text-white rounded-b-[32px] shadow-lift">
+        <div className="safe-t px-5 pt-5 pb-20">
+          <div className="flex items-center gap-3">
+            {activeTab!=='home' && activeTab!=='review' && activeTab!=='scores' && (
+              <button onClick={()=>backRef.current()} className="w-10 h-10 rounded-full glass flex items-center justify-center press flex-shrink-0"><i className="fas fa-chevron-left text-sm"></i></button>
+            )}
+            <div className="w-11 h-11 rounded-2xl bg-white/95 text-brand-600 flex items-center justify-center font-bold text-lg flex-shrink-0 shadow-card">
+              {isStudent ? initial(user.name) : <i className="fas fa-chalkboard-user text-base"></i>}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] text-white/70 leading-tight">{greet()}</p>
+              <h1 className="text-[17px] font-bold truncate leading-tight">{user.name}</h1>
+            </div>
+            <span className="text-[11px] glass px-2.5 py-1 rounded-full font-medium whitespace-nowrap">
+              {isStudent ? `ชั้น ${shortGrade(user.grade)} เลขที่ ${user.studentNo}` : 'โหมดครู'}
+            </span>
+            <button onClick={handleLogout} className="w-10 h-10 rounded-full glass flex items-center justify-center press flex-shrink-0"><i className="fas fa-right-from-bracket text-sm"></i></button>
+          </div>
+        </div>
+      </header>
+
+      <main className="px-4 -mt-14 relative z-10">
+
+        {/* ================= STUDENT HOME ================= */}
+        {isStudent && activeTab==='home' && (
+          <div className="fade-up space-y-4">
+            
+            <div className="bg-white rounded-3xl shadow-card p-5 border-t-4 border-brand-500">
+              <h2 className="text-[14px] font-bold text-ink-700 mb-4 flex items-center"><i className="fas fa-calendar-week mr-2 text-brand-500"></i>สัปดาห์นี้</h2>
+              <div className="space-y-3.5">
+                <div className="flex items-center gap-3">
+                  <span className="w-16 text-xs text-ink-500 font-medium">คะแนน</span>
+                  <div className="flex-1 h-3 bg-paper rounded-full overflow-hidden">
+                    <div className="h-full bg-brand-500 rounded-full" style={{width: `${(currWeekGradingHP/600)*100}%`}}></div>
+                  </div>
+                  <span className="text-xs font-bold w-12 text-right">{(currWeekGradingHP/100).toFixed(1)} <span className="text-ink-400 font-normal">/ 6.0</span></span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-16 text-xs text-ink-500 font-medium">HP (แต้ม)</span>
+                  <div className="flex-1 h-3 bg-paper rounded-full overflow-hidden">
+                    <div className="h-full bg-sky-500 rounded-full" style={{width: `${Math.min(100,(currWeekAccHP/700)*100)}%`}}></div>
+                  </div>
+                  <span className="text-xs font-bold w-12 text-right">{currWeekAccHP}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="w-16 text-xs text-ink-500 font-medium">HP วันนี้</span>
+                  <div className="flex-1 h-3 bg-paper rounded-full overflow-hidden">
+                    <div className="h-full bg-amber-400 rounded-full" style={{width: `${(todayHP/100)*100}%`}}></div>
+                  </div>
+                  <span className="text-xs font-bold w-12 text-right">{todayHP} <span className="text-ink-400 font-normal">/ 100</span></span>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl shadow-card p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                 <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-500 flex items-center justify-center text-xl shadow-inner"><i className="fas fa-trophy"></i></div>
+                 <div>
+                   <p className="text-[11px] text-ink-400 font-medium">🏆 HP สะสม (จัดอันดับ)</p>
+                   <p className="text-[13px] font-bold text-ink-900 mt-0.5">{myRank > 0 ? `อันดับ #${myRank} ของโรงเรียน` : 'ยังไม่มีอันดับ'}</p>
+                 </div>
+              </div>
+              <div className="text-right">
+                 <p className="text-2xl font-bold text-amber-500 num leading-none">{stats.totalAcc}</p>
+                 <p className="text-[10px] text-ink-400 mt-1">HP</p>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-3xl shadow-card p-5 relative overflow-hidden">
+              <div className="absolute top-0 right-0 bg-brand-50 px-4 py-2.5 rounded-bl-2xl">
+                <span className="text-xs text-brand-700 font-bold">คะแนนตอนนี้ {stats.totalScore} / 10</span>
+              </div>
+              <h2 className="text-[14px] font-bold text-ink-900 mb-4">โครงสร้างคะแนนรวม</h2>
+              
+              <div className="space-y-2.5 mb-5">
+                 <div className="flex justify-between text-[13px] border-b border-slate-50 pb-2">
+                    <span className="text-ink-600"><span className="font-bold w-4 inline-block">A</span> ปริมาณ ({stats.totalGrading} HP)</span>
+                    <span className="font-bold">{stats.scoreA.toFixed(1)} <span className="text-ink-300 font-normal">/ 7.0</span></span>
+                 </div>
+                 <div className="flex justify-between text-[13px] border-b border-slate-50 pb-2">
+                    <span className="text-ink-600"><span className="font-bold w-4 inline-block">B</span> สม่ำเสมอ ({stats.activeWeeks} สัปดาห์)</span>
+                    <span className="font-bold">{stats.scoreB.toFixed(1)} <span className="text-ink-300 font-normal">/ 2.0</span></span>
+                 </div>
+                 <div className="flex justify-between text-[13px] pb-1">
+                    <span className="text-ink-600"><span className="font-bold w-4 inline-block">C</span> หลากหลาย ({stats.variety} ชนิด)</span>
+                    <span className="font-bold">{stats.scoreC.toFixed(1)} <span className="text-ink-300 font-normal">/ 1.0</span></span>
+                 </div>
+              </div>
+              
+              <div className="bg-sky-50 rounded-2xl p-3.5 flex gap-3 items-start">
+                 <i className="fas fa-lightbulb text-sky-500 mt-0.5 text-lg"></i>
+                 <p className="text-[11.5px] text-sky-800 font-medium leading-relaxed">
+                    อีก <strong className="text-sky-600">{hpNeeded} HP</strong> (ประมาณวิ่ง {Math.ceil(hpNeeded/0.55)} นาที หรือเต้น {Math.ceil(hpNeeded/0.45)} นาที) จะได้คะแนน A เพิ่มขึ้น
+                 </p>
+              </div>
+            </div>
+
+            <div>
+              <SectionTitle icon="fa-bolt" color="text-amber-500" title="เลือกกิจกรรม" sub="แตะเพื่อเริ่มบันทึก"/>
+              <div className="space-y-2.5">
+                {ACTIVITIES.map(a=>(
+                  <button key={a.id} onClick={()=>navigate('activity',a)} className="w-full bg-white rounded-3xl shadow-card p-4 flex items-center gap-4 press text-left">
+                    <div className={`w-14 h-14 rounded-2xl ${a.tint} flex items-center justify-center flex-shrink-0`}><i className={`fas ${a.icon} text-xl ${a.text}`}></i></div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-ink-900 text-[15px] leading-tight">{a.name}</p>
+                      <p className="text-[11px] text-ink-400 mt-0.5 truncate">{a.desc}</p>
+                    </div>
+                    <i className="fas fa-chevron-right text-xs text-ink-400/60"></i>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= ACTIVITY ================= */}
+        {isStudent && activeTab==='activity' && selectedAct && (
+          <div className="fade-up space-y-4">
+            <div className="bg-white rounded-3xl shadow-card p-5 flex items-center gap-4">
+              <div className={`w-16 h-16 rounded-2xl ${selectedAct.tint} flex items-center justify-center flex-shrink-0`}><i className={`fas ${selectedAct.icon} text-2xl ${selectedAct.text}`}></i></div>
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold text-ink-900 leading-tight">{selectedAct.name}</h2>
+                <p className="text-xs text-ink-400 mt-1">{selectedAct.desc}</p>
+              </div>
+            </div>
+            {selectedAct.type==='gps' ? (
+              <div className="bg-white rounded-3xl shadow-card p-6">
+                <div className="flex justify-center">
+                  <div className={`relative ${isTracking&&gpsState==='moving'?'ring-pulse':''}`}>
+                    <ProgressRing value={distance} max={selectedAct.minKm} color={selectedAct.ring} size={188} stroke={13}>
+                      <span className="text-[46px] font-bold text-ink-900 num leading-none">{distance.toFixed(2)}</span>
+                      <span className="text-xs text-ink-400 mt-1">กิโลเมตร</span>
+                      <span className="text-[10px] text-ink-400/70 mt-0.5">เป้า {selectedAct.minKm} กม.</span>
+                    </ProgressRing>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2.5 mt-6">
+                  <MiniStat icon="fa-stopwatch" value={fmtTime(elapsedTime)} label="เวลาทั้งหมด" tone="text-ink-900"/>
+                  <MiniStat icon="fa-shoe-prints" value={fmtTime(movingTime)} label="เวลาที่เคลื่อนที่" tone="text-brand-600"/>
+                </div>
+                {isTracking && (
+                  <div className={`mt-3 flex items-center justify-center gap-2 text-xs font-semibold ${gpsInfo[0]} ${gpsInfo[1]} rounded-2xl py-2.5`}>
+                    <i className={`fas ${gpsInfo[2]}`}></i>{gpsInfo[3]} {gpsAcc!==null&&gpsState!=='weak' && <span className="text-ink-400 font-normal">±{gpsAcc} ม.</span>}
+                  </div>
+                )}
+                <button onClick={isTracking?stopRunning:startRunning} className={`w-full h-14 mt-4 rounded-2xl font-bold text-white shadow-lift press ${isTracking?'bg-rose-500':'bg-brand-600'}`}>
+                  <i className={`fas ${isTracking?'fa-stop':'fa-play'} mr-2 text-sm`}></i>{isTracking?'หยุดจับเวลา':'เริ่มวิ่ง'}
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white rounded-3xl shadow-card p-5">
+                <div className="grid grid-cols-2 gap-3">
+                  <PhotoSlot label="ก่อนเริ่ม" step="1" img={imgBefore} time={timeBefore} onPick={e=>handleUpload(e,1)} onView={setPreview} onDelete={deleteBeforePhoto} disabled={busy}/>
+                  <PhotoSlot label="หลังเสร็จ" step="2" img={imgAfter} time={timeAfter} onPick={e=>handleUpload(e,2)} onView={setPreview} disabled={busy||!imgBefore} hint={!imgBefore?'ถ่ายรูปแรกก่อน':null}/>
+                </div>
+                <div className="mt-4">
+                  <div className="flex justify-between text-xs mb-2">
+                    <span className="text-ink-500 font-medium"><i className="fas fa-stopwatch mr-1.5"></i>ระยะเวลา</span>
+                    <span className={`font-bold ${timeDiffMinutes>=selectedAct.minMin?'text-brand-600':'text-amber-600'}`}>{timeDiffMinutes} / {selectedAct.minMin} นาที</span>
+                  </div>
+                  <div className="h-2.5 bg-paper rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full transition-all duration-500 ${timeDiffMinutes>=selectedAct.minMin?'bg-brand-500':'bg-amber-400'}`} style={{width:`${Math.min(100,(timeDiffMinutes/selectedAct.minMin)*100)}%`}}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+            <button onClick={submitTask} disabled={busy} className="w-full h-14 rounded-2xl bg-brand-600 text-white font-bold shadow-lift press disabled:opacity-50">
+              {busy?<><i className="fas fa-spinner fa-spin mr-2"></i>กำลังส่ง...</>:<><i className="fas fa-paper-plane mr-2 text-sm"></i>ส่งให้ครูตรวจ</>}
+            </button>
+          </div>
+        )}
+
+        {/* ================= LEADERBOARD ================= */}
+        {activeTab==='leaderboard' && (
+          <div className="fade-up bg-white rounded-3xl shadow-card p-4">
+            <SectionTitle icon="fa-trophy" color="text-amber-500" title="อันดับ HP สะสม" sub="Top 10 ของโรงเรียน" flush/>
+            {loadingData ? <SkeletonList/> : leaderboard.length===0 ? <EmptyInline text="ยังไม่มีข้อมูล"/> : (
+              <div className="space-y-1.5 mt-3">
+                {leaderboard.map((r,i)=>{
+                  const me=r.name===user.name; const medal=['bg-amber-400','bg-slate-300','bg-orange-400'][i]||'bg-slate-200';
+                  return (
+                    <div key={r.name} className={`flex items-center gap-3 p-3 rounded-2xl transition ${me?'bg-brand-50 ring-1 ring-brand-200':'bg-paper'}`}>
+                      <span className={`w-9 h-9 rounded-xl ${medal} ${i<3?'text-white':'text-ink-700'} flex items-center justify-center font-bold text-sm flex-shrink-0`}>{i<3?<i className="fas fa-crown text-xs"></i>:i+1}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-ink-900 text-sm truncate">{r.name}{me && <span className="text-[10px] text-brand-600 font-bold ml-1.5">คุณ</span>}</p>
+                        <p className="text-[11px] text-ink-400">{shortGrade(r.grade)} เลขที่ {r.studentNo}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <span className="font-bold text-brand-600 num">{r.points}</span>
+                        <p className="text-[9px] text-ink-400">HP</p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ================= HISTORY ================= */}
+        {activeTab==='history' && (
+          <div className="fade-up bg-white rounded-3xl shadow-card p-4">
+            <SectionTitle icon="fa-clock-rotate-left" color="text-sky-500" title="ประวัติของฉัน" sub={`ทั้งหมด ${myTasks.length} รายการ`} flush/>
+            {loadingData ? <SkeletonList/> : myTasks.length===0 ? <EmptyInline text="ยังไม่มีรายการ"/> : (
+              <div className="mt-2">{myTasks.map(t=><TaskRow key={t.id} t={t}/>)}</div>
+            )}
+          </div>
+        )}
+
+        {/* ================= TEACHER SCORES ================= */}
+        {!isStudent && activeTab==='scores' && (
+           <div className="fade-up space-y-3">
+             <div className="bg-white rounded-3xl shadow-card p-4">
+                <SectionTitle icon="fa-ranking-star" color="text-brand-500" title="สรุปคะแนนนักเรียน" sub="คำนวณอัตโนมัติจากงานที่อนุมัติแล้ว" flush/>
+                <div className="flex gap-2 mt-4 overflow-x-auto pb-1 -mx-1 px-1">
+                   {['มัธยมศึกษาปีที่ 1', 'มัธยมศึกษาปีที่ 2', 'มัธยมศึกษาปีที่ 3'].map(g => (
+                      <button key={g} onClick={()=>setTeacherFilterGrade(g)} 
+                        className={`whitespace-nowrap px-4 py-2 rounded-xl text-xs font-bold transition-all ${teacherFilterGrade===g?'bg-brand-600 text-white shadow-md':'bg-paper text-ink-500'}`}>
+                        ชั้น {shortGrade(g)}
+                      </button>
+                   ))}
+                </div>
+             </div>
+             
+             <div className="space-y-2">
+                {loadingData ? <SkeletonList/> : filteredTeacherUsers.length===0 ? <EmptyCard icon="fa-users-slash" text={`ไม่มีนักเรียนชั้น ${shortGrade(teacherFilterGrade)}`}/> : 
+                  filteredTeacherUsers.map(u => {
+                    const uTasks = tasks.filter(t => t.studentName === u.name && t.status === 'approved');
+                    const uStats = calcStats(uTasks);
+                    return (
+                      <div key={u.id} className="bg-white rounded-3xl shadow-card p-3 flex items-center justify-between gap-3 fade-up">
+                         <div className="w-12 h-12 bg-brand-50 rounded-2xl text-brand-600 font-bold text-lg flex items-center justify-center flex-shrink-0">
+                            {u.studentNo}
+                         </div>
+                         <div className="flex-1 min-w-0">
+                            <p className="font-bold text-ink-900 truncate text-[15px]">{u.name}</p>
+                            <p className="text-[11px] text-ink-400 mt-0.5">อนุมัติแล้ว {uTasks.length} งาน</p>
+                         </div>
+                         <div className="text-right flex-shrink-0">
+                            <p className="font-bold text-brand-600 text-[17px] num">{uStats.totalScore}</p>
+                            <p className="text-[10px] text-ink-400">เต็ม 10</p>
+                         </div>
+                         <button onClick={()=>deleteStudent(u.name)} className="w-10 h-10 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center press flex-shrink-0 ml-1">
+                            <i className="fas fa-trash-alt text-sm"></i>
+                         </button>
+                      </div>
+                    );
+                  })
+                }
+             </div>
+           </div>
+        )}
+
+        {/* ================= TEACHER REVIEW ================= */}
+        {!isStudent && activeTab==='review' && (
+          <div className="fade-up space-y-3">
+            <div className="bg-white rounded-3xl shadow-card p-4 flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-brand-50 flex items-center justify-center"><i className="fas fa-clipboard-check text-lg text-brand-600"></i></div>
+              <div className="flex-1"><p className="font-bold text-ink-900">รายการรอตรวจสอบ</p><p className="text-[11px] text-ink-400">แตะรูปเพื่อดูขนาดเต็ม</p></div>
+              <span className="bg-amber-50 text-amber-600 px-3.5 py-1.5 rounded-full text-sm font-bold num">{pendingAll.length}</span>
+            </div>
+            {loadingData ? <SkeletonList/> : pendingAll.length===0 ? ( <EmptyCard icon="fa-circle-check" tone="text-brand-400" text="ตรวจครบทุกรายการแล้ว 🎉"/>
+            ) : pendingAll.map(t=>{
+              const a=actById(t.activityId);
+              return (
+                <div key={t.id} className="bg-white rounded-3xl shadow-card p-4 fade-up">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-brand-50 text-brand-600 flex items-center justify-center font-bold flex-shrink-0">{initial(t.studentName)}</div>
+                    <div className="min-w-0 flex-1"><p className="font-bold text-ink-900 truncate text-sm">{t.studentName}</p><p className="text-[11px] text-ink-400">ชั้น {shortGrade(t.grade)} เลขที่ {t.studentNo} · {fmtDT(t.createdAt)}</p></div>
+                    <span className="text-xs bg-brand-50 text-brand-600 px-2.5 py-1 rounded-full font-bold whitespace-nowrap">+{t.hp||0} HP</span>
+                  </div>
+                  <div className={`mt-3 ${a?.tint||'bg-paper'} rounded-2xl p-3 flex items-center gap-2.5`}>
+                    <i className={`fas ${a?.icon||'fa-star'} ${a?.text||'text-ink-500'}`}></i>
+                    <span className="text-sm font-semibold text-ink-900">{t.activityName}</span>
+                    {t.distance!=null && <span className="ml-auto text-sm font-bold text-ink-900 num">{t.distance} กม.</span>}
+                  </div>
+                  {(t.duration||t.avgPace!=null) && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {t.duration ? <Chip icon="fa-stopwatch" tone="slate" label={`${Math.round(t.duration/60)} นาที`}/> : null}
+                      {t.avgPace!=null && <Chip icon="fa-gauge-high" tone={t.avgPace<3?'amber':'slate'} label={`${t.avgPace} นาที/กม.`}/>}
+                    </div>
+                  )}
+                  {(t.imgBefore||t.imgAfter) && (
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      {[['ก่อน',t.imgBefore,t.timeBefore],['หลัง',t.imgAfter,t.timeAfter]].map(([l,src,tm])=>src&&(
+                        <div key={l} onClick={()=>setPreview(src)} className="press cursor-pointer">
+                          <img src={src} className="w-full h-28 object-cover rounded-2xl" alt={l}/>
+                          <p className="text-[10px] text-ink-400 mt-1.5 text-center">{l} · {fmtDT(tm)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-2 mt-4">
+                    <button onClick={()=>review(t.id,'rejected')} className="h-12 rounded-2xl bg-rose-50 text-rose-600 font-bold press text-sm"><i className="fas fa-xmark mr-1.5"></i>ปฏิเสธ</button>
+                    <button onClick={()=>review(t.id,'approved')} className="h-12 rounded-2xl bg-brand-600 text-white font-bold press text-sm shadow-lift"><i className="fas fa-check mr-1.5"></i>อนุมัติ</button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      <nav className="fixed bottom-0 inset-x-0 bg-white/95 backdrop-blur-lg border-t border-slate-100 shadow-nav safe-b z-40">
+        <div className="flex max-w-lg mx-auto">
+          {(isStudent
+            ? [['home','หน้าหลัก','fa-house'],['leaderboard','อันดับ','fa-trophy'],['history','ประวัติ','fa-clock-rotate-left']]
+            : [['review','ตรวจงาน','fa-clipboard-check'],['scores','คะแนน','fa-ranking-star'],['leaderboard','อันดับ','fa-trophy']]
+          ).map(([tab,label,ic])=>{
+            const on = activeTab===tab || (tab==='home'&&activeTab==='activity');
             return (
-                <div className="min-h-screen pb-20 relative max-w-md mx-auto bg-slate-50 sm:shadow-2xl sm:min-h-[850px] overflow-hidden">
-                    
-                    {/* Header โค้งสีเขียว */}
-                    <div className="bg-gradient-to-br from-emerald-400 to-emerald-600 pt-12 pb-8 px-6 rounded-b-[2.5rem] text-white shadow-lg relative z-20">
-                        <button onClick={()=>setIsLoggedIn(false)} className="absolute top-5 right-5 text-white/70 hover:text-white bg-white/10 p-2 rounded-full backdrop-blur-sm"><i className="fa-solid fa-power-off"></i></button>
-                        
-                        <div className="flex items-center gap-4">
-                            <div className="w-14 h-14 rounded-full border-2 border-white/30 bg-white/20 flex items-center justify-center text-xl backdrop-blur-sm shadow-inner">
-                                <i className={`fa-solid ${role==='student'?'fa-user':'fa-shield-halved'}`}></i>
-                            </div>
-                            <div>
-                                <p className="text-emerald-100 font-medium text-xs mb-0.5">{role==='student'?'นักเรียน':'โหมดครูผู้ตรวจ'}</p>
-                                <h2 className="text-xl font-bold truncate max-w-[220px]">{role==='student'?studentName:'คุณครู'}</h2>
-                            </div>
-                        </div>
-
-                        {role === 'student' && activeTab === 'home' && (
-                            <div className="mt-6 bg-white/10 backdrop-blur-md rounded-2xl p-4 border border-white/20 flex justify-between items-center shadow-sm">
-                                <div>
-                                    <p className="text-emerald-100 text-xs font-bold mb-1">คะแนนสะสมของคุณ</p>
-                                    <div className="flex items-baseline gap-1">
-                                        <span className="text-4xl font-black">{myPoints}</span>
-                                        <span className="text-sm font-medium opacity-80">แต้ม</span>
-                                    </div>
-                                </div>
-                                <div className="text-right">
-                                    <i className="fa-solid fa-medal text-4xl text-yellow-300 drop-shadow-md"></i>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-
-                    <div className="px-5 pt-6 pb-24 h-[calc(100vh-180px)] sm:h-[650px] overflow-y-auto bg-slate-50 relative z-10 -mt-5">
-                        
-                        {/* หน้านักเรียน: เลือก 4 ฐาน */}
-                        {role === 'student' && activeTab === 'home' && (
-                            <div className="animate-in fade-in">
-                                <h3 className="font-bold text-slate-700 mb-4 flex items-center gap-2">
-                                    <i className="fa-solid fa-fire text-orange-500"></i> เลือกกิจกรรมสุขภาพ
-                                </h3>
-                                <div className="grid grid-cols-2 gap-4">
-                                    {ACTIVITIES.map(act => (
-                                        <div key={act.id} onClick={() => { setSelectedAct(act); setActiveTab('activity'); }} 
-                                             className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 cursor-pointer active:scale-95 transition-transform flex flex-col items-center text-center">
-                                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl mb-3 shadow-sm ${act.color}`}>
-                                                <i className={`fa-solid ${act.icon}`}></i>
-                                            </div>
-                                            <h4 className="font-bold text-slate-800 text-sm leading-tight h-10 flex items-center">{act.title}</h4>
-                                            <span className="text-[10px] font-bold px-3 py-1 rounded-full bg-emerald-50 text-emerald-600 mt-1 border border-emerald-100">+{act.points} แต้ม</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* หน้ากิจกรรม (วิ่ง / ถ่ายรูป) */}
-                        {role === 'student' && activeTab === 'activity' && selectedAct && (
-                            <div className="animate-in slide-in-from-right-4">
-                                <button onClick={resetActivity} className="text-sm font-bold text-slate-500 mb-4 bg-white px-4 py-2 rounded-full shadow-sm hover:bg-slate-100"><i className="fa-solid fa-arrow-left mr-1"></i> ย้อนกลับ</button>
-                                
-                                <div className="bg-white rounded-[2rem] p-6 shadow-sm border border-slate-100 text-center relative">
-                                    
-                                    <div className={`w-16 h-16 mx-auto rounded-2xl flex items-center justify-center text-3xl mb-4 shadow-sm ${selectedAct.color}`}>
-                                        <i className={`fa-solid ${selectedAct.icon}`}></i>
-                                    </div>
-                                    <h2 className="text-xl font-black text-slate-800 mb-1">{selectedAct.title}</h2>
-                                    <p className="text-emerald-500 font-bold text-sm mb-6 bg-emerald-50 inline-block px-3 py-1 rounded-full border border-emerald-100">รางวัล +{selectedAct.points} แต้ม</p>
-
-                                    {/* 1. ระบบจับวิ่ง (GPS) */}
-                                    {selectedAct.type === 'gps' && (
-                                        <div className="flex flex-col items-center">
-                                            <div className={`w-48 h-48 rounded-full border-[10px] flex flex-col items-center justify-center mb-6 transition-all ${isTracking ? 'border-emerald-400 pulse-ring bg-emerald-50' : 'border-slate-100 bg-white'}`}>
-                                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">ระยะทาง (กม.)</span>
-                                                <span className={`text-5xl font-black tracking-tighter ${isTracking?'text-emerald-600':'text-slate-800'}`}>{distance.toFixed(2)}</span>
-                                                <span className="text-sm font-mono text-slate-500 mt-1 bg-slate-100 px-3 py-0.5 rounded-full">{formatTime(elapsedTime)}</span>
-                                            </div>
-                                            
-                                            {!isTracking ? (
-                                                <button onClick={startRunning} className="w-full bg-emerald-500 text-white font-bold text-lg py-4 rounded-2xl active:scale-95 shadow-md shadow-emerald-200"><i className="fa-solid fa-play mr-2"></i> เริ่มวิ่ง!</button>
-                                            ) : (
-                                                <button onClick={stopRunning} disabled={isLoading} className="w-full bg-red-500 text-white font-bold text-lg py-4 rounded-2xl active:scale-95 shadow-md shadow-red-200"><i className="fa-solid fa-stop mr-2"></i> จบการวิ่ง และส่งผล</button>
-                                            )}
-                                        </div>
-                                    )}
-
-                                    {/* 2. ระบบถ่ายรูป Before & After */}
-                                    {selectedAct.type === 'photo2' && (
-                                        <div className="space-y-4 text-left">
-                                            <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef1} onChange={handleUpload1} />
-                                            <input type="file" accept="image/*" capture="environment" className="hidden" ref={fileInputRef2} onChange={handleUpload2} />
-                                            
-                                            {/* ช่อง 1 */}
-                                            <div onClick={()=> !imgBefore && fileInputRef1.current.click()} 
-                                                 className={`upload-box relative border-2 border-dashed rounded-2xl p-4 flex items-center gap-4 overflow-hidden h-28
-                                                 ${imgBefore ? 'completed border-emerald-400' : 'active border-emerald-400 bg-emerald-50'}`}>
-                                                
-                                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-black shrink-0 z-10 ${imgBefore?'bg-emerald-500 text-white shadow-md':'bg-emerald-100 text-emerald-500'}`}>1</div>
-                                                
-                                                <div className="z-10 flex-1">
-                                                    <p className={`font-bold ${imgBefore?'text-emerald-700':'text-emerald-600'}`}>{imgBefore?'ถ่ายรูปก่อนเริ่มสำเร็จ!':'ถ่ายรูป "ก่อน" ออกกำลังกาย'}</p>
-                                                    {imgBefore && <p className="text-xs text-emerald-500 font-mono mt-0.5"><i className="fa-solid fa-clock"></i> {new Date(timeBefore).toLocaleTimeString('th-TH')}</p>}
-                                                </div>
-
-                                                {imgBefore && <img src={imgBefore} className="absolute inset-0 w-full h-full object-cover opacity-20"/>}
-                                            </div>
-
-                                            {/* ช่อง 2 */}
-                                            <div onClick={()=> imgBefore && !imgAfter && fileInputRef2.current.click()} 
-                                                 className={`upload-box relative border-2 border-dashed rounded-2xl p-4 flex items-center gap-4 overflow-hidden h-28
-                                                 ${!imgBefore ? 'disabled' : imgAfter ? 'completed border-emerald-400' : 'active border-orange-400 bg-orange-50'}`}>
-                                                
-                                                <div className={`w-12 h-12 rounded-full flex items-center justify-center text-xl font-black shrink-0 z-10 ${!imgBefore?'bg-slate-200 text-slate-400':imgAfter?'bg-emerald-500 text-white shadow-md':'bg-orange-100 text-orange-500'}`}>2</div>
-                                                
-                                                <div className="z-10 flex-1">
-                                                    <p className={`font-bold ${!imgBefore?'text-slate-400':imgAfter?'text-emerald-700':'text-orange-600'}`}>{!imgBefore?'ต้องถ่ายรูปที่ 1 ก่อน':imgAfter?'ถ่ายรูปหลังเสร็จสำเร็จ!':'ออกกำลังกายเสร็จแล้ว! ถ่ายรูปเลย'}</p>
-                                                    {imgAfter && <p className="text-xs text-emerald-500 font-mono mt-0.5"><i className="fa-solid fa-clock"></i> {new Date(timeAfter).toLocaleTimeString('th-TH')}</p>}
-                                                </div>
-
-                                                {imgAfter && <img src={imgAfter} className="absolute inset-0 w-full h-full object-cover opacity-20"/>}
-                                            </div>
-                                            
-                                            {/* สรุปเวลา & ปุ่มส่ง */}
-                                            {imgBefore && imgAfter && (
-                                                 <div className="animate-in slide-in-from-bottom-4 mt-6">
-                                                     <div className="bg-emerald-50 py-4 rounded-2xl border border-emerald-100 text-center mb-4">
-                                                         <p className="text-xs font-bold text-emerald-600 mb-1">สรุปเวลาที่คุณออกกำลังกาย</p>
-                                                         <p className="text-3xl font-black text-emerald-500">{timeDiffMinutes} <span className="text-sm font-medium text-emerald-600">นาที</span></p>
-                                                     </div>
-                                                     <button onClick={submitPhotoTask} disabled={isLoading} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-2xl shadow-lg active:scale-95 transition">
-                                                         {isLoading ? 'กำลังส่งข้อมูล...' : <><i className="fa-solid fa-paper-plane mr-2"></i> ส่งให้คุณครูตรวจ</>}
-                                                     </button>
-                                                 </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* หน้า Leaderboard */}
-                        {activeTab === 'leaderboard' && (
-                            <div className="animate-in fade-in">
-                                <h2 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"><i className="fa-solid fa-trophy text-yellow-500"></i> อันดับคนเก่ง (Top 10)</h2>
-                                {leaderboard.length === 0 ? (
-                                    <div className="text-center text-slate-400 bg-white p-8 rounded-3xl border border-slate-100">ยังไม่มีข้อมูล</div>
-                                ) : (
-                                    <div className="space-y-3">
-                                        {leaderboard.map((u, i) => (
-                                            <div key={u.name} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between">
-                                                <div className="flex items-center gap-3">
-                                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm ${i===0?'bg-yellow-100 text-yellow-600':i===1?'bg-slate-200 text-slate-600':i===2?'bg-orange-100 text-orange-600':'bg-slate-50 text-slate-400'}`}>{i+1}</div>
-                                                    <span className="font-bold text-slate-700">{u.name}</span>
-                                                </div>
-                                                <span className="font-black text-emerald-500 text-lg">{u.pts} <span className="text-xs text-emerald-300">แต้ม</span></span>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        {/* หน้าครู: ตรวจงาน */}
-                        {role === 'teacher' && activeTab === 'review' && (
-                            <div className="animate-in fade-in">
-                                {pendingTasks.length === 0 ? (
-                                    <div className="text-center bg-white p-10 rounded-3xl border border-dashed border-slate-200 text-slate-400">
-                                        <i className="fa-solid fa-mug-hot text-4xl mb-3 text-emerald-200"></i><p className="font-bold">ตรวจงานหมดแล้ว!</p>
-                                    </div>
-                                ) : (
-                                    <div className="space-y-4">
-                                        {pendingTasks.map(t => (
-                                            <div key={t.id} className="bg-white rounded-3xl p-5 shadow-sm border border-slate-200">
-                                                <div className="flex justify-between items-start mb-4">
-                                                    <div>
-                                                        <h4 className="font-bold text-slate-800 text-lg">{t.studentName}</h4>
-                                                        <p className="text-xs text-slate-500"><i className="fa-regular fa-clock"></i> ส่งเมื่อ {t.timeStr}</p>
-                                                    </div>
-                                                    <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 text-xs font-bold px-3 py-1 rounded-full">{t.activityTitle}</span>
-                                                </div>
-
-                                                {t.type === 'gps' ? (
-                                                    <div className="bg-slate-50 rounded-2xl p-4 text-center border border-slate-100 mb-4">
-                                                        <i className="fa-solid fa-route text-3xl text-emerald-300 mb-2"></i>
-                                                        <p className="font-bold text-slate-700">{t.desc}</p>
-                                                    </div>
-                                                ) : (
-                                                    <div>
-                                                        <div className="flex gap-2 mb-3">
-                                                            <div className="flex-1 relative rounded-xl overflow-hidden aspect-square bg-slate-100 border border-slate-200">
-                                                                <img src={t.img1} className="w-full h-full object-cover" />
-                                                                <div className="absolute top-1 left-1 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-md">1. ก่อนเริ่ม</div>
-                                                            </div>
-                                                            <div className="flex-1 relative rounded-xl overflow-hidden aspect-square bg-slate-100 border border-slate-200">
-                                                                <img src={t.img2} className="w-full h-full object-cover" />
-                                                                <div className="absolute top-1 left-1 bg-black/60 text-white text-[10px] px-2 py-0.5 rounded-md">2. หลังเสร็จ</div>
-                                                            </div>
-                                                        </div>
-                                                        <div className="text-center text-sm font-bold text-emerald-600 bg-emerald-50 py-2 rounded-xl mb-4 border border-emerald-100">
-                                                            <i className="fa-solid fa-stopwatch"></i> {t.desc}
-                                                        </div>
-                                                    </div>
-                                                )}
-
-                                                <div className="flex gap-2">
-                                                    <button onClick={()=>actionTask(t.id, 'rejected')} className="flex-1 py-3 text-red-500 font-bold bg-red-50 hover:bg-red-100 rounded-xl transition text-sm"><i className="fa-solid fa-xmark"></i> ปฏิเสธ</button>
-                                                    <button onClick={()=>actionTask(t.id, 'approved')} className="flex-[2] py-3 text-white font-bold bg-emerald-500 hover:bg-emerald-600 rounded-xl shadow-md transition text-sm"><i className="fa-solid fa-check"></i> อนุมัติ +{t.points}</button>
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Navbar ด้านล่าง */}
-                    <div className="absolute bottom-0 w-full bg-white/90 backdrop-blur-md border-t border-slate-100 px-6 py-4 flex justify-around items-center z-30 pb-safe">
-                        {role === 'student' ? (
-                            <>
-                                <button onClick={() => { setActiveTab('home'); resetActivity(); }} className={`flex flex-col items-center gap-1 ${activeTab==='home'||activeTab==='activity' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}>
-                                    <i className="fa-solid fa-house text-xl"></i><span className="text-[10px] font-bold">หน้าแรก</span>
-                                </button>
-                                <button onClick={() => setActiveTab('leaderboard')} className={`flex flex-col items-center gap-1 ${activeTab==='leaderboard' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}>
-                                    <i className="fa-solid fa-chart-simple text-xl"></i><span className="text-[10px] font-bold">อันดับคะแนน</span>
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                <button onClick={() => setActiveTab('review')} className={`flex flex-col items-center gap-1 ${activeTab==='review' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}>
-                                    <i className="fa-solid fa-clipboard-check text-xl"></i><span className="text-[10px] font-bold">ตรวจงาน ({pendingTasks.length})</span>
-                                </button>
-                                <button onClick={() => setActiveTab('leaderboard')} className={`flex flex-col items-center gap-1 ${activeTab==='leaderboard' ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}>
-                                    <i className="fa-solid fa-chart-simple text-xl"></i><span className="text-[10px] font-bold">อันดับคะแนน</span>
-                                </button>
-                            </>
-                        )}
-                    </div>
-
-                    {/* แจ้งเตือน Toast */}
-                    {showNotif.show && (
-                        <div className="absolute top-8 left-1/2 -translate-x-1/2 z-50 animate-in slide-in-from-top-4">
-                            <div className={`${showNotif.type==='error'?'bg-red-500':'bg-slate-800'} text-white px-5 py-3 rounded-full shadow-2xl text-sm font-bold flex items-center gap-2 w-max`}>
-                                <i className={`fa-solid ${showNotif.type==='error'?'fa-circle-xmark':'fa-circle-check'}`}></i> {showNotif.msg}
-                            </div>
-                        </div>
-                    )}
-                </div>
+              <button key={tab} onClick={()=>{ if(activeTab==='activity') resetActivity(); navigate(tab); }} className="flex-1 py-2.5 flex flex-col items-center gap-0.5 press">
+                <span className={`w-11 h-8 rounded-full flex items-center justify-center transition-all ${on?'bg-brand-50':''}`}><i className={`fas ${ic} text-[17px] ${on?'text-brand-600':'text-ink-400'}`}></i></span>
+                <span className={`text-[10px] font-semibold ${on?'text-brand-600':'text-ink-400'}`}>{label}</span>
+              </button>
             );
-        }
+          })}
+        </div>
+      </nav>
+    </div>
+  );
+}
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
+/* ============================================================
+   5) UI COMPONENTS
+============================================================ */
+function Toast({toast}){
+  if(!toast) return null; const ok=toast.type==='success';
+  return (
+    <div className="fixed bottom-24 inset-x-0 z-[60] flex justify-center px-6 pointer-events-none">
+      <div className={`toast-up flex items-center gap-2.5 px-4 py-3 rounded-2xl shadow-lift text-white text-sm font-semibold max-w-xs ${ok?'bg-ink-900':'bg-rose-500'}`}>
+        <i className={`fas ${ok?'fa-circle-check text-brand-400':'fa-circle-exclamation'} `}></i><span className="leading-snug">{toast.msg}</span>
+      </div>
+    </div>
+  );
+}
+function ProgressRing({value,max,color,size=100,stroke=10,children}){
+  const r=(size-stroke)/2, c=2*Math.PI*r, pct=Math.min(1,Math.max(0,(value||0)/(max||1)));
+  return (
+    <div className="relative flex-shrink-0" style={{width:size,height:size}}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="#eef4f1" strokeWidth={stroke}/>
+        <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c*(1-pct)} style={{transition:'stroke-dashoffset .6s cubic-bezier(.3,.9,.3,1)'}}/>
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center">{children}</div>
+    </div>
+  );
+}
+const Field=({icon,type='text',value,onChange,placeholder})=>(
+  <div className="relative">
+    <i className={`fas ${icon} absolute left-4 top-1/2 -translate-y-1/2 text-ink-400 text-sm`}></i>
+    <input type={type} value={value} onChange={e=>onChange(e.target.value)} placeholder={placeholder} className="w-full h-14 pl-11 pr-4 rounded-2xl bg-paper border border-transparent focus:bg-white focus:border-brand-400 focus:ring-4 focus:ring-brand-100 outline-none text-ink-900 placeholder:text-ink-400 transition"/>
+  </div>
+);
+const MiniStat=({icon,value,label,tone})=>(
+  <div className="bg-paper rounded-2xl py-3 text-center">
+    <p className={`text-xl font-bold num ${tone}`}><i className={`fas ${icon} text-[11px] text-ink-400 mr-1.5`}></i>{value}</p>
+    <p className="text-[10px] text-ink-400 mt-0.5">{label}</p>
+  </div>
+);
+const Chip=({icon,label,tone='slate'})=>{
+  const t={brand:'bg-brand-50 text-brand-600',amber:'bg-amber-50 text-amber-600',slate:'bg-paper text-ink-500'}[tone];
+  return <span className={`inline-flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-full ${t}`}><i className={`fas ${icon}`}></i>{label}</span>;
+};
+const SectionTitle=({icon,color,title,sub,flush})=>(
+  <div className={`flex items-end justify-between ${flush?'':'px-1 mb-2.5'}`}>
+    <div><h2 className="font-bold text-ink-900 text-[15px]"><i className={`fas ${icon} ${color} mr-2 text-sm`}></i>{title}</h2>{sub && <p className="text-[11px] text-ink-400 mt-0.5 ml-6">{sub}</p>}</div>
+  </div>
+);
+const TaskRow=({t})=>{
+  const a=actById(t.activityId);
+  return (
+    <div className="flex items-center gap-3 p-3 rounded-2xl hover:bg-paper transition">
+      <div className={`w-10 h-10 rounded-xl ${a?.tint||'bg-paper'} flex items-center justify-center flex-shrink-0`}><i className={`fas ${a?.icon||'fa-star'} text-sm ${a?.text||'text-ink-500'}`}></i></div>
+      <div className="flex-1 min-w-0"><p className="font-semibold text-sm text-ink-900 truncate">{t.activityName}</p><p className="text-[11px] text-ink-400">{fmtDT(t.createdAt)}{t.hp!=null?` · ${t.hp} HP`:''}</p></div>
+      <StatusBadge s={t.status}/>
+    </div>
+  );
+};
+const StatusBadge=({s})=>{
+  const m={approved:['bg-brand-50 text-brand-600','fa-check','อนุมัติ'], pending:['bg-amber-50 text-amber-600','fa-hourglass-half','รอตรวจ'], rejected:['bg-rose-50 text-rose-600','fa-xmark','ไม่ผ่าน']};
+  const [cls,ic,txt]=m[s]||m.pending;
+  return <span className={`text-[10px] px-2.5 py-1.5 rounded-full font-bold whitespace-nowrap flex-shrink-0 ${cls}`}><i className={`fas ${ic} mr-1`}></i>{txt}</span>;
+};
+const SkeletonList=()=><div className="space-y-2 mt-3">{[0,1,2].map(i=><div key={i} className="h-16 rounded-2xl shimmer"></div>)}</div>;
+const EmptyInline=({text})=><div className="py-12 text-center"><i className="fas fa-inbox text-3xl text-ink-400/40"></i><p className="text-sm text-ink-400 mt-2">{text}</p></div>;
+const EmptyCard=({icon,text,tone='text-ink-400/40'})=><div className="bg-white rounded-3xl shadow-card p-12 text-center fade-up"><i className={`fas ${icon} text-5xl ${tone}`}></i><p className="text-ink-500 mt-3 font-medium">{text}</p></div>;
+
+function PhotoSlot({label,step,img,time,onPick,onView,onDelete,disabled,hint}){
+  const id='f_'+step;
+  return (
+    <div>
+      <p className="text-xs font-semibold text-ink-700 mb-2 flex items-center gap-1.5">
+        <span className={`w-4 h-4 rounded-full text-[9px] flex items-center justify-center text-white ${img?'bg-brand-500':'bg-ink-400/50'}`}>{img?<i className="fas fa-check text-[7px]"></i>:step}</span>{label}
+      </p>
+      {img ? (
+        <div className="relative group">
+          <div onClick={()=>onView(img)} className="relative press cursor-pointer">
+            <img src={img} className="w-full h-36 object-cover rounded-2xl" alt={label}/>
+            <span className="absolute bottom-2 left-2 bg-black/65 text-white text-[9px] px-2 py-1 rounded-lg backdrop-blur-sm"><i className="fas fa-clock mr-1"></i>{fmtDT(time)}</span>
+          </div>
+          {onDelete && !disabled && (
+            <button onClick={(e)=>{ e.stopPropagation(); onDelete(); }} className="absolute -top-2 -right-2 w-7 h-7 bg-rose-500 text-white rounded-full flex items-center justify-center shadow-md press">
+              <i className="fas fa-trash-alt text-[10px]"></i>
+            </button>
+          )}
+        </div>
+      ) : (
+        <label htmlFor={id} className={`h-36 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center gap-1.5 transition ${disabled?'border-slate-200 bg-paper text-ink-400/50':'border-brand-300 bg-brand-50/50 text-brand-600 cursor-pointer active:scale-95'}`}>
+          <i className="fas fa-camera text-2xl"></i><span className="text-[11px] font-semibold">{hint||'แตะเพื่อถ่ายรูป'}</span>
+        </label>
+      )}
+      <input id={id} type="file" accept="image/*" capture="environment" disabled={disabled} onChange={onPick} className="hidden"/>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<ErrorBoundary><App/></ErrorBoundary>);
+</script>
 </body>
 </html>
