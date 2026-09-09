@@ -96,15 +96,11 @@ const USERS_PATH = 'artifacts/health-passport-v5/public/data/users';
 const TEACHER_PASSWORD = '191919';
 const LS_KEY = 'hp_user_v5';
 
-// GPS Config แบบ App วิ่งระดับโปร (Strava/NRC logic)
+// [ปรับแก้ GPS ใหม่] ให้เซนซิทีฟสุดๆ เดินนิดเดียวก็ขึ้น
 const GPS = {
-  maxAccuracy: 40,    // ยอมรับความแม่นยำที่แกว่งไม่เกิน 40 เมตร
-  warmupFixes: 1,     // ข้ามได้เลย ถ้ารับสัญญาณได้แปลว่าพร้อม
-  minMove: 1.5,       // ขยับแค่ 1.5 เมตรก็นับแล้ว (ก้าวเดินประมาณ 2 ก้าว)
-  noiseFactor: 0.5,   // ลด Noise Filter ลง เพื่อให้ตอบสนองไวขึ้น
-  minSpeed: 0.1,      // ความเร็วต่ำสุด 0.1 m/s (เดินเล่นชิลๆ ก็ขึ้น)
-  maxSpeed: 8.0,      // ความเร็วสูงสุด 8 m/s (ประมาณ 28 กม./ชม. ป้องกันพิกัดกระโดด Jump ไกลๆ)
-  moveStreak: 1,      // ไม่ต้องรอ Streak นับเข้ายอดทันที
+  maxAccuracy: 60,    // ขยายเพดานความแม่นยำ มือถือเก่าๆ ก็เล่นได้
+  minMove: 1.0,       // ขยับแค่ 1 เมตร (ก้าวเดียว) นับทันที
+  maxSpeed: 10.0,     // ป้องกันพิกัดกระโดดไกลๆ (36 กม./ชม.)
 };
 
 let db=null, auth=null, initError=null;
@@ -130,7 +126,6 @@ const actById = id => ACTIVITIES.find(a => a.id === id);
 /* ============================================================
    2) HELPERS
 ============================================================ */
-// ฟังก์ชันคำนวณระยะทางแบบ Haversine (แม่นยำสูง)
 function getDistanceM(lat1,lon1,lat2,lon2){
   const R=6371000, toRad=d=>d*Math.PI/180;
   const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
@@ -230,7 +225,6 @@ function App(){
   const [activeTab,setActiveTab]=useState('home');
   const [selectedAct,setSelectedAct]=useState(null);
 
-  // States สำหรับระบบวิ่ง (Running Tracker)
   const [isTracking,setIsTracking]=useState(false);
   const [isPaused, setIsPaused] = useState(false); 
   const [distance,setDistance]=useState(0);
@@ -255,7 +249,7 @@ function App(){
   const [teacherFilterGrade, setTeacherFilterGrade] = useState('มัธยมศึกษาปีที่ 1');
 
   const watchRef=useRef(null), timerRef=useRef(null), toastRef=useRef(null);
-  const lastPos=useRef(null), warmup=useRef(0), streak=useRef(0), pending=useRef(0), movingAt=useRef(0);
+  const lastPos=useRef(null), movingAt=useRef(0);
 
   const showToast=useCallback((msg,type='success')=>{
     setToast({msg,type}); clearTimeout(toastRef.current);
@@ -287,7 +281,7 @@ function App(){
   const stopWatchers=useCallback(()=>{
     if(watchRef.current!==null){ navigator.geolocation.clearWatch(watchRef.current); watchRef.current=null; }
     if(timerRef.current){ clearInterval(timerRef.current); timerRef.current=null; }
-    lastPos.current=null; warmup.current=0; streak.current=0; pending.current=0; movingAt.current=0;
+    lastPos.current=null; movingAt.current=0;
   },[]);
   useEffect(()=>()=>stopWatchers(),[stopWatchers]);
 
@@ -410,82 +404,51 @@ function App(){
     setBusy(false);
   };
 
-  // ระบบติดตามตำแหน่ง GPS (Location Tracking System)
+  // [ปลดล็อก GPS] รับสัญญาณไว เดินปุ๊บขึ้นปั๊บ
   const onPosition = useCallback(pos => {
-    // ถ้าหยุดพักอยู่ ไม่ต้องสนใจพิกัดที่เข้ามาเลย (กันพิกัดดิ้นตอนนั่งนิ่งๆ)
     if (!isTracking) return;
 
     const {latitude:lat, longitude:lng, accuracy:acc} = pos.coords; 
     const t = pos.timestamp || Date.now();
     setGpsAcc(Math.round(acc));
     
-    // 1. ตรวจสอบความแม่นยำ (ถ้ารับสัญญาณแย่มากให้ข้าม)
+    // ยอมรับสัญญาณที่แย่ได้ถึงระดับหนึ่งเพื่อให้เริ่มจับเร็วขึ้น
     if(acc > GPS.maxAccuracy){ 
         setGpsState('weak'); 
-        streak.current = 0; 
         return; 
     }
     
-    // 2. ถ้าเป็นพิกัดแรก ให้บันทึกไว้แล้วรอก้าวถัดไป
     const prev = lastPos.current; 
     if(!prev){ 
         lastPos.current = {lat, lng, t, acc}; 
-        setGpsState('warmup');
+        setGpsState('moving'); // ไม่ต้องรอ Warmup ให้ขึ้น moving เลย
         return; 
     }
     
-    const dt = (t - prev.t) / 1000; // เวลาที่ผ่านไป (วินาที)
-    if(dt < 1) return; // เร็วไปข้าม
+    const dt = (t - prev.t) / 1000; 
+    if(dt < 1) return; 
     
-    // 3. คำนวณระยะห่าง (ระยะกระจัด) แบบเป๊ะๆ ด้วย Haversine
     const d = getDistanceM(prev.lat, prev.lng, lat, lng);
     
-    // 4. การกรอง Noise (กันเดินถือโทรศัพท์แกว่งไปมาแล้วเลขพุ่ง)
-    // ถ้าระยะห่างน้อยกว่าความคลาดเคลื่อนเฉลี่ย ถือว่าเป็นการยืนอยู่กับที่
-    const floor = Math.max(GPS.minMove, ((acc + prev.acc) / 2) * GPS.noiseFactor);
-    if(d < floor){ 
+    // ถ้าระยะห่างก้าวแรกน้อยกว่าที่ตั้งไว้ ให้รอไปก่อน
+    if(d < GPS.minMove){ 
         setGpsState('idle'); 
-        streak.current = 0; 
-        pending.current = 0; 
         return; 
     }
     
-    // 5. คำนวณความเร็วเอง (ระยะทาง / เวลา) ไม่พึ่งพา Hardware Speed เพราะมันเอ๋อบ่อย
     const v = d / dt;
     
-    // ตรวจจับพฤติกรรมโกงหรือ GPS Jump (กระโดดไกลๆ รวดเดียว)
+    // กัน GPS Jump อย่างเดียว
     if(v > GPS.maxSpeed){ 
-        // ถ้าเร็วเหนือมนุษย์ ให้ทิ้งระยะนี้ไปเลย แต่จำพิกัดใหม่ไว้
         lastPos.current = {lat, lng, t, acc}; 
-        streak.current = 0; 
-        pending.current = 0; 
         setGpsState('idle'); 
         return; 
     }
     
-    // ถ้าขยับช้าเกินไป (ต่ำกว่า 0.1 เมตร/วินาที)
-    if(v < GPS.minSpeed){ 
-        setGpsState('idle'); 
-        streak.current = 0; 
-        pending.current = 0; 
-        return; 
-    }
-    
-    // 6. บันทึกข้อมูลและบวกระยะทาง (ถ้าผ่านด่านทั้งหมดมาได้)
+    // ผ่านทุกเงื่อนไข บันทึกตำแหน่งใหม่และอัปเดตระยะทางทันที
     lastPos.current = {lat, lng, t, acc}; 
-    streak.current++;
     
-    if(streak.current < GPS.moveStreak){ 
-        pending.current += d; 
-        setGpsState('idle'); 
-        return; 
-    }
-    
-    const add = d + pending.current; 
-    pending.current = 0;
-    
-    // อัปเดต State แบบ Functional ป้องกันระยะทางโดนเขียนทับตอน Component Render ซ้อน
-    setDistance(prevDistance => prevDistance + (add / 1000)); 
+    setDistance(prevDistance => prevDistance + (d / 1000)); 
     movingAt.current = Date.now(); 
     setGpsState('moving');
 
@@ -494,7 +457,6 @@ function App(){
   const startRunning=()=>{
     if(!navigator.geolocation) return showToast('อุปกรณ์ไม่รองรับ GPS','error');
     
-    // ถ้านี่คือการ "เริ่มวิ่งต่อ (Resume)" ไม่ต้องเคลียร์ระยะทางและเวลา
     if (!hasStarted) {
         setDistance(0); setElapsedTime(0); setMovingTime(0); 
     }
@@ -502,13 +464,9 @@ function App(){
     setHasStarted(true);
     setIsPaused(false);
     setIsTracking(true); 
-    setGpsState('warmup');
+    setGpsState('moving'); // กดปุ๊บโชว์ว่าทำงานปั๊บ
     
-    // รีเซ็ตตัวแปรคำนวณตำแหน่ง เพื่อเริ่มจับจากจุดปัจจุบันทันที
     lastPos.current = null; 
-    warmup.current = 0; 
-    streak.current = 0; 
-    pending.current = 0; 
     movingAt.current = 0; 
     
     if(!timerRef.current) {
@@ -518,10 +476,11 @@ function App(){
       }, 1000);
     }
     
+    // ตั้งค่าให้ GPS ส่งข้อมูลมารัวๆ ทันทีที่มีการขยับ
     watchRef.current = navigator.geolocation.watchPosition(
         onPosition,
         err => showToast('สัญญาณ GPS มีปัญหา: '+err.message,'error'),
-        { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
     );
   };
   
@@ -583,9 +542,6 @@ function App(){
   const submitTask=async()=>{
     if(!selectedAct||!user) return;
     const a=selectedAct;
-    
-    // นำการจำกัดเวลา 2 ชั่วโมงออกเรียบร้อยแล้ว
-    // สามารถส่งกิจกรรมรัวๆ ต่อเนื่องกันได้เลย
 
     let hp = 0;
     if(a.type==='gps'){
